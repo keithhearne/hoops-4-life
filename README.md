@@ -1,1 +1,21 @@
-# hoops-4-life
+# Hoops 4 Life
+
+Zackie vs Keelan: a 1 v 1 basketball game for Android phones, built as an installable web app.
+
+**Play:** https://keithhearne.github.io/hoops-4-life/
+
+## Install on an Android phone
+1. Open the link above in Chrome.
+2. Tap the ⋮ menu, then **Install app** (or **Add to Home screen**).
+3. Open Hoops 4 Life from the home screen. It runs full-screen in landscape and works without internet.
+
+## Controls
+- **Joystick (left):** move left and right.
+- **Jump / Block:** jump. When defending, tap again at the top of the jump for a double jump.
+- **Shoot (hold):** fill the power bar and let go in the green sweet spot. Pull the joystick back while holding for a fade-away.
+- **Dunk:** in your blue zone under the hoop, Shoot turns into Dunk.
+
+## Files
+- `index.html` – the whole game
+- `manifest.webmanifest`, `icon-*.png`, `apple-touch-icon.png` – app name and icons for installing
+- `sw.js` – keeps the game on the phone so it works offline

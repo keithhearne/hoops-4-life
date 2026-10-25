@@ -1,0 +1,1301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Hoops 4 Life</title>
+<meta name="theme-color" content="#10152B">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+*,*::before,*::after{box-sizing:border-box}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html,body{height:100%;margin:0}
+body{overscroll-behavior:none;touch-action:none}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@700;900&display=swap">
+<style>
+/* One-screen arcade court: canvas scaled to fit, controls drawn in-game. Single dark arena look. */
+:root{
+  --arena:#10152B; --court:#1B2340; --ink:#FFFFFF; --muted:#C9D1EE; --accent:#FFC93C;
+  --display:"Bungee", "Arial Black", Impact, sans-serif;
+  --body:"Nunito", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{
+  background:var(--arena); color:var(--ink); font-family:var(--body);
+  padding-left:max(16px, env(safe-area-inset-left, 0px));
+  padding-right:max(16px, env(safe-area-inset-right, 0px));
+  padding-block:0; box-sizing:border-box; overflow:hidden;
+  -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
+}
+#wrap{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
+canvas{display:block;touch-action:none;border-radius:10px;background:var(--court)}
+canvas:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+#rotate{
+  position:fixed; inset:0; background:var(--arena); display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:14px; text-align:center;
+  padding-left:max(16px, env(safe-area-inset-left, 0px)); padding-right:max(16px, env(safe-area-inset-right, 0px));
+}
+#rotate[hidden]{display:none}
+#rotate h1{font-family:var(--display);font-size:28px;margin:0;color:var(--accent);text-wrap:balance}
+#rotate p{margin:0;color:var(--muted);font-weight:700;max-width:30ch}
+#rotate button{
+  font:900 16px var(--body); color:var(--court); background:var(--accent); border:0;
+  border-radius:14px; padding:12px 22px; cursor:pointer;
+}
+#rotate button:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+</style>
+
+<div id="wrap"><canvas id="game" tabindex="0" aria-label="Hoops 4 Life basketball game. Use the joystick to move, Jump to jump or block, and hold Shoot to power up a shot."></canvas></div>
+<div id="rotate" hidden>
+  <h1>Turn your phone sideways</h1>
+  <p>Hoops 4 Life is played in landscape so both hoops fit on screen.</p>
+  <button id="rotateOk" type="button">Play anyway</button>
+</div>
+
+<script>
+(function(){
+const W=844, H=390, FLOOR=310, G=1100, GB=900, FILL=1.75, WIN=21;
+const RR={x:757,y:184,board:777,front:737,dir:1};   // right hoop: Player 1 attacks it
+const RL={x:87,y:184,board:67,front:107,dir:-1};    // left hoop: computer attacks it
+const THREE=550, HALF=422;
+const JOY={x:74,y:320,r:54}, SHOOT={x:782,y:328,r:42}, JUMP={x:713,y:295,r:33};
+const PAUSE_BTN={x:16,y:14,w:40,h:40};
+const ZONES={
+  inside:{name:"Inside 3PT", n:[60,80], f:[64,76], pts:2, cpu:0.68},
+  mid:{name:"3PT to half court", n:[70,80], f:[72,78], pts:3, cpu:0.48},
+  far:{name:"Past half court", n:[75,80], f:[76,79], pts:3, cpu:0.2}
+};
+const COMMENTS={
+  two:["BUCKET!","Count it!","Easy money!","Nothing but net!","SWISH!","Cash!","Too easy!","That's how you do it!"],
+  three:["From DOWNTOWN!","SPLASH!","Rain drop!","Long-distance call... ANSWERED!","Wet like water!","BANG! Three points!"],
+  half:["FROM THE PARKING LOT!","Are you KIDDING me?!","Somebody call grandma!","That's not legal! (It is.)","Is that even possible?!"],
+  fade:["Fade-away... and it's GOOD!","Leaning, falling, SCORING!","Smooth like butter!","Can't block what you can't reach!"],
+  fire:["HEATING UP!","Somebody stop this kid!","ON FIRE!","Call the fire brigade!","Unstoppable!"],
+  short:["Short! Eat your vegetables!","Needed more juice!","Front rim says hi!","So close... not really!"],
+  air:["AIR BALL!","Missed EVERYTHING!","Ball, meet floor!","The net is lonely!"],
+  long:["BRICK! Building a house?","Too much sauce!","Off the back iron!","Clank!","Easy, superhero!"],
+  auto:["Held it too long! It's in orbit!","Houston, we have a problem!","Let GO next time!","That one's going to space!"],
+  block:["REJECTED!","Not in my house!","Get that outta here!","Return to sender!","DENIED!"],
+  dunk:["SLAM DUNK!","BOOM! Throw it DOWN!","Posterized!","Hang on that rim!","MONSTER JAM!","Rattled the backboard!"],
+  dunkMiss:["Rim says NO!","Clanked the dunk!","Too much swagger!","Front iron, OUCH!","The rim fought back!"]
+};
+const KEY={x0:684,x1:804}, DUNK_X=745, RISE=0.4, SLAM=0.12, DROP=0.25;
+function inKey(x){return x>=KEY.x0 && x<=KEY.x1;}
+const lastPick={};
+function pick(cat){
+  const list=COMMENTS[cat]; let i=Math.floor(Math.random()*list.length);
+  if(list.length>1 && i===lastPick[cat]) i=(i+1)%list.length;
+  lastPick[cat]=i; return list[i];
+}
+const C={court:"#1B2340",stands:"#232C4F",row:"#2C365E",floor:"#D99A5B",floorLine:"#B47A42",chalk:"#F3EDE0",
+  steel:"#9AA3BF",ball:"#F26B1D",seam:"#7A2E05",p1:"#2F6FE4",p2:"#FFC93C",skin1:"#E9B48A",skin2:"#8A5A3C",
+  panel:"#2E3866",warn:"#FFC93C",info:"#7DB0FF",ink:"#FFFFFF",muted:"#C9D1EE",green:"#3DDC97",red:"#FF5A5A",navy:"#1B2340",wood:"#3A2410"};
+
+const cv=document.getElementById("game"), ctx=cv.getContext("2d");
+let scale=1, rotateDismissed=false;
+function fit(){
+  const wrap=document.getElementById("wrap");
+  scale=Math.max(0.2, Math.min(wrap.clientWidth/W, wrap.clientHeight/H));
+  const dpr=window.devicePixelRatio||1;
+  cv.style.width=(W*scale)+"px"; cv.style.height=(H*scale)+"px";
+  cv.width=Math.round(W*scale*dpr); cv.height=Math.round(H*scale*dpr);
+  ctx.setTransform(scale*dpr,0,0,scale*dpr,0,0);
+  const portrait=window.innerHeight>window.innerWidth*1.1;
+  document.getElementById("rotate").hidden=!(portrait && !rotateDismissed);
+}
+document.getElementById("rotateOk").addEventListener("click",()=>{rotateDismissed=true;fit();});
+window.addEventListener("resize",fit);
+
+// ---------- state ----------
+const p={x:380,y:FLOOR,vy:0,ground:true,lean:0};
+const d={x:440,y:FLOOR,vy:0,ground:true,lean:0,react:null,jumped:false};
+const cpu={spot:200,charging:false,t:0,hold:1,fade:false};
+const ball={state:"held",x:0,y:0,vx:0,vy:0,x0:0,y0:0,t:0,T:1,make:false,pts:2,timer:0,shooter:null,missType:"short",fade:false,far:false};
+const charge={on:false,power:0,fade:false,zone:null,range:null,shown:0,lastPower:0,holdT:0};
+const stats={score:0,cpu:0,made:0,att:0,streak:0,best:0,threes:0,dunks:0,blk:0};
+let owner=p, cpuOn=true, gameOverT=0, inboundT=0, pendingInbound=null;
+const dunk={on:false,t:0,x0:0,success:false,resolved:false,hang:0};
+const cdunk={on:false,t:0,x0:0,success:false,resolved:false,hang:0};
+// How good the computer is. Raise or lower these to tune it.
+const SKILL={noReact:0.2, timingNoise:0.35, defSpeed:160, chaseSpeed:178, atkSpeed:135, fadeChance:0.65,
+  dunkTry:0.3, dunkMake:0.5, blockDunk:0.25, dblChance:0.33};
+const CPU_DUNK_X=W-DUNK_X;
+let shakeT=0, needRelease=false;
+// double jump timing: the window is the top of the first jump, while the player is nearly still in the air
+const APEX_VY=120;
+let dblFx={t:0,x:0,y:0}, cpuFx={t:0,x:0,y:0}, dblMiss=0;
+// double jump is a defensive move only: it works while the opponent has the ball or their shot is in the air
+function apexWindow(){return !p.ground && !p.dbl && !dunk.on && !charge.on && playerDefending() && Math.abs(p.vy)<APEX_VY;}
+// reaction faces: each player shows "happy", "shock" or "grump" for a moment after a play
+const moods={p:{m:"happy",t:0},d:{m:"happy",t:0}};
+function moodOf(lk){return (lk.dir>0?moods.p:moods.d).m;}
+function setMood(e,m,t){const s=e===p?moods.p:moods.d; s.m=m; s.t=t||2.2;}
+// celebration pop-up with the manga portrait of whoever made the big play
+let celebrate={who:null,t:0,T:2.2};
+const BIG_PLAYS=["dunk","three","half","fire"];
+function celebrateFor(e,t){celebrate={who:e===p?"p":"d",t:t||2.2,T:t||2.2};}
+const MANGA_SVG_Z="<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"400\" height=\"480\" viewBox=\"0 0 400 480\"> <defs><clipPath id=\"clipA\"><rect width=\"400\" height=\"480\" rx=\"20\"/></clipPath></defs> <g clip-path=\"url(#clipA)\" stroke=\"#1A1424\" stroke-linejoin=\"round\" stroke-linecap=\"round\"> <rect width=\"400\" height=\"480\" fill=\"#2F6FE4\" stroke=\"none\"/> <path d=\"M200 190 L900.0 190.0 L894.2 279.7 Z M200 190 L871.6 387.2 L840.8 471.7 Z M200 190 L788.9 568.4 L735.5 640.8 Z M200 190 L658.4 719.0 L586.8 773.4 Z M200 190 L490.8 826.7 L406.8 858.8 Z M200 190 L299.6 882.9 L210.0 889.9 Z M200 190 L100.4 882.9 L12.4 864.4 Z M200 190 L-90.8 826.7 L-170.0 784.2 Z M200 190 L-258.4 719.0 L-322.4 655.9 Z M200 190 L-388.9 568.4 L-432.5 489.9 Z M200 190 L-471.6 387.2 L-491.4 299.5 Z M200 190 L-500.0 190.0 L-494.2 100.3 Z M200 190 L-471.6 -7.2 L-440.8 -91.7 Z M200 190 L-388.9 -188.4 L-335.5 -260.8 Z M200 190 L-258.4 -339.0 L-186.8 -393.4 Z M200 190 L-90.8 -446.7 L-6.8 -478.8 Z M200 190 L100.4 -502.9 L190.0 -509.9 Z M200 190 L299.6 -502.9 L387.6 -484.4 Z M200 190 L490.8 -446.7 L570.0 -404.2 Z M200 190 L658.4 -339.0 L722.4 -275.9 Z M200 190 L788.9 -188.4 L832.5 -109.9 Z M200 190 L871.6 -7.2 L891.4 80.5 Z \" fill=\"#5C8EEA\" stroke=\"none\"/> <path d=\"M30 480 C40 410 90 380 160 366 L240 366 C310 380 360 410 370 480 Z\" fill=\"#F2C6A8\" stroke-width=\"5\"/> <path d=\"M172 296 L168 372 L232 372 L228 296 Z\" fill=\"#F2C6A8\" stroke-width=\"5\"/> <path d=\"M172 300 L229 300 L229 334 Q200 350 171 334 Z\" fill=\"#D9A285\" stroke=\"none\"/> <path d=\"M92 480 L100 404 C122 392 140 380 150 366 L172 366 L200 410 L228 366 L250 366 C260 380 278 392 300 404 L308 480 Z\" fill=\"#2F6FE4\" stroke-width=\"5\"/> <path d=\"M160 370 L200 422 L240 370\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"7\"/> <path d=\"M104 402 C124 391 141 379 152 368 M296 402 C276 391 259 379 248 368\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"6\"/> <text x=\"200\" y=\"476\" text-anchor=\"middle\" font-family=\"Bungee, 'Arial Black', sans-serif\" font-size=\"56\" fill=\"#FFFFFF\" stroke=\"#1A1424\" stroke-width=\"5\" paint-order=\"stroke\">11</text> <ellipse cx=\"116\" cy=\"205\" rx=\"21\" ry=\"29\" fill=\"#F2C6A8\" stroke-width=\"5\"/> <path d=\"M113 189 Q99 205 113 223\" fill=\"none\" stroke-width=\"3.5\"/> <ellipse cx=\"284\" cy=\"205\" rx=\"21\" ry=\"29\" fill=\"#F2C6A8\" stroke-width=\"5\"/> <path d=\"M287 189 Q301 205 287 223\" fill=\"none\" stroke-width=\"3.5\"/> <path d=\"M122 170 C120 245 150 300 200 322 C250 300 280 245 278 170 C278 100 245 66 200 66 C155 66 122 100 122 170 Z\" fill=\"#F2C6A8\" stroke=\"none\"/> <path d=\"M122 170 C120 245 150 300 200 322 C172 300 152 252 154 196 Z\" fill=\"#D9A285\" stroke=\"none\" opacity=\"0.75\"/> <path d=\"M128 160 L142 124 L150 152 L166 122 L176 156 L192 124 L206 160 L220 124 L236 158 L244 122 L258 152 L272 176 L126 178 Z\" fill=\"#D9A285\" stroke=\"none\"/> <path d=\"M122 170 C120 245 150 300 200 322 C250 300 280 245 278 170 C278 100 245 66 200 66 C155 66 122 100 122 170 Z\" fill=\"none\" stroke-width=\"5\"/> <path d=\"M124 190 L98 152 L120 140 L84 100 L128 100 L108 50 L155 78 L160 18 L192 62 L215 10 L234 62 L270 24 L264 84 L312 64 L284 112 L322 118 L286 148 L302 182 L276 172 L258 152 L244 122 L236 158 L220 124 L206 160 L192 124 L176 156 L166 122 L150 152 L142 124 L128 160 Z\" fill=\"#E3B85A\" stroke-width=\"5\" stroke-linejoin=\"miter\" stroke-miterlimit=\"10\"/> <path d=\"M160 18 L168 74 L178 70 Z M215 10 L214 66 L224 66 Z M108 50 L140 96 L148 88 Z M270 24 L248 76 L258 80 Z M84 100 L124 118 L126 108 Z M312 64 L270 104 L278 110 Z\" fill=\"#B98A35\" stroke=\"none\"/> <path d=\"M146 96 Q200 74 256 96\" fill=\"none\" stroke=\"#FFF1C9\" stroke-width=\"7\" opacity=\"0.85\"/> <path d=\"M140 178 L184 170 M216 170 L260 178\" fill=\"none\" stroke-width=\"9\"/> <ellipse cx=\"164\" cy=\"208\" rx=\"22\" ry=\"25\" fill=\"#FFFFFF\" stroke-width=\"4\"/> <circle cx=\"168\" cy=\"211\" r=\"12\" fill=\"#6E8A9A\" stroke=\"none\"/> <circle cx=\"168\" cy=\"211\" r=\"6\" fill=\"#1A1424\" stroke=\"none\"/> <circle cx=\"173\" cy=\"205\" r=\"3.6\" fill=\"#FFFFFF\" stroke=\"none\"/> <path d=\"M140 202 Q164 178 188 199 M140 202 L129 194\" fill=\"none\" stroke-width=\"8\"/> <ellipse cx=\"236\" cy=\"208\" rx=\"22\" ry=\"25\" fill=\"#FFFFFF\" stroke-width=\"4\"/> <circle cx=\"240\" cy=\"211\" r=\"12\" fill=\"#6E8A9A\" stroke=\"none\"/> <circle cx=\"240\" cy=\"211\" r=\"6\" fill=\"#1A1424\" stroke=\"none\"/> <circle cx=\"245\" cy=\"205\" r=\"3.6\" fill=\"#FFFFFF\" stroke=\"none\"/> <path d=\"M212 199 Q236 178 260 202 M260 202 L271 194\" fill=\"none\" stroke-width=\"8\"/> <path d=\"M200 226 L192 248 L205 250\" fill=\"none\" stroke-width=\"4\"/> <path d=\"M138 242 l-7 11 M149 242 l-7 11 M160 242 l-7 11 M240 242 l7 11 M251 242 l7 11 M262 242 l7 11\" fill=\"none\" stroke=\"#C84646\" stroke-width=\"3.5\"/> <path d=\"M130 256 Q200 270 270 256 Q262 314 200 318 Q138 314 130 256 Z\" fill=\"#FFFFFF\" stroke-width=\"5\"/> <path d=\"M136 282 Q200 296 264 282\" fill=\"none\" stroke-width=\"3\"/> <path d=\"M152 262 L152 306 M168 265 L168 312 M184 266 L184 315 M216 266 L216 315 M232 265 L232 312 M248 262 L248 306\" fill=\"none\" stroke-width=\"2.5\"/> <rect x=\"195\" y=\"266\" width=\"10\" height=\"22\" fill=\"#1A1424\" stroke=\"none\"/> <path d=\"M124 250 l9 9 M276 250 l-9 9\" fill=\"none\" stroke-width=\"4\"/> </g> </svg>";
+const MANGA_SVG_K="<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"400\" height=\"480\" viewBox=\"0 0 400 480\"> <defs><clipPath id=\"clipB\"><rect width=\"400\" height=\"480\" rx=\"20\"/></clipPath></defs> <g clip-path=\"url(#clipB)\" stroke=\"#1A1424\" stroke-linejoin=\"round\" stroke-linecap=\"round\"> <rect width=\"400\" height=\"480\" fill=\"#FFC93C\" stroke=\"none\"/> <path d=\"M200 190 L900.0 190.0 L894.2 279.7 Z M200 190 L871.6 387.2 L840.8 471.7 Z M200 190 L788.9 568.4 L735.5 640.8 Z M200 190 L658.4 719.0 L586.8 773.4 Z M200 190 L490.8 826.7 L406.8 858.8 Z M200 190 L299.6 882.9 L210.0 889.9 Z M200 190 L100.4 882.9 L12.4 864.4 Z M200 190 L-90.8 826.7 L-170.0 784.2 Z M200 190 L-258.4 719.0 L-322.4 655.9 Z M200 190 L-388.9 568.4 L-432.5 489.9 Z M200 190 L-471.6 387.2 L-491.4 299.5 Z M200 190 L-500.0 190.0 L-494.2 100.3 Z M200 190 L-471.6 -7.2 L-440.8 -91.7 Z M200 190 L-388.9 -188.4 L-335.5 -260.8 Z M200 190 L-258.4 -339.0 L-186.8 -393.4 Z M200 190 L-90.8 -446.7 L-6.8 -478.8 Z M200 190 L100.4 -502.9 L190.0 -509.9 Z M200 190 L299.6 -502.9 L387.6 -484.4 Z M200 190 L490.8 -446.7 L570.0 -404.2 Z M200 190 L658.4 -339.0 L722.4 -275.9 Z M200 190 L788.9 -188.4 L832.5 -109.9 Z M200 190 L871.6 -7.2 L891.4 80.5 Z \" fill=\"#FFDB7A\" stroke=\"none\"/> <path d=\"M30 480 C40 410 90 380 160 366 L240 366 C310 380 360 410 370 480 Z\" fill=\"#F0C3A7\" stroke-width=\"5\"/> <path d=\"M174 300 L168 372 L232 372 L226 300 Z\" fill=\"#F0C3A7\" stroke-width=\"5\"/> <path d=\"M174 304 L227 304 L228 338 Q200 354 172 338 Z\" fill=\"#D4A086\" stroke=\"none\"/> <path d=\"M92 480 L100 404 C122 392 140 380 150 366 L172 366 L200 410 L228 366 L250 366 C260 380 278 392 300 404 L308 480 Z\" fill=\"#FFC93C\" stroke-width=\"5\"/> <path d=\"M160 370 L200 422 L240 370\" fill=\"none\" stroke=\"#1B2340\" stroke-width=\"7\"/> <path d=\"M104 402 C124 391 141 379 152 368 M296 402 C276 391 259 379 248 368\" fill=\"none\" stroke=\"#1B2340\" stroke-width=\"6\"/> <text x=\"200\" y=\"476\" text-anchor=\"middle\" font-family=\"Bungee, 'Arial Black', sans-serif\" font-size=\"56\" fill=\"#1B2340\" stroke=\"#FFFFFF\" stroke-width=\"5\" paint-order=\"stroke\">3</text> <ellipse cx=\"118\" cy=\"208\" rx=\"17\" ry=\"25\" fill=\"#F0C3A7\" stroke-width=\"5\"/> <path d=\"M115 194 Q104 208 115 223\" fill=\"none\" stroke-width=\"3.5\"/> <ellipse cx=\"282\" cy=\"208\" rx=\"17\" ry=\"25\" fill=\"#F0C3A7\" stroke-width=\"5\"/> <path d=\"M285 194 Q296 208 285 223\" fill=\"none\" stroke-width=\"3.5\"/> <path d=\"M124 168 C122 250 152 306 200 328 C248 306 278 250 276 168 C276 100 244 70 200 70 C156 70 124 100 124 168 Z\" fill=\"#F0C3A7\" stroke=\"none\"/> <path d=\"M124 168 C122 250 152 306 200 328 C172 306 154 256 156 196 Z\" fill=\"#D4A086\" stroke=\"none\" opacity=\"0.75\"/> <path d=\"M124 168 C122 250 152 306 200 328 C248 306 278 250 276 168 C276 100 244 70 200 70 C156 70 124 100 124 168 Z\" fill=\"none\" stroke-width=\"5\"/> <path d=\"M126 190 L118 140 L126 92 L150 48 L190 22 L242 8 L300 16 L334 42 L326 78 L304 64 L308 98 L284 106 L286 142 L276 180 L268 136 L234 120 L200 117 L166 121 L140 134 L132 162 Z\" fill=\"#6B4A32\" stroke-width=\"5\" stroke-linejoin=\"miter\" stroke-miterlimit=\"10\"/> <path d=\"M126 190 L118 140 L134 146 L136 184 Z M276 180 L286 142 L272 140 Z\" fill=\"#8C6A4E\" stroke=\"none\"/> <path d=\"M318 34 Q232 26 150 60 M318 72 Q230 56 138 98 M290 100 Q222 92 148 124\" fill=\"none\" stroke=\"#3E2A1C\" stroke-width=\"4\"/> <path d=\"M286 24 Q226 26 176 44\" fill=\"none\" stroke=\"#A07A58\" stroke-width=\"7\"/> <path d=\"M140 176 L186 170 M214 164 L260 170\" fill=\"none\" stroke=\"#3A2416\" stroke-width=\"10\"/> <ellipse cx=\"164\" cy=\"208\" rx=\"21\" ry=\"22\" fill=\"#FFFFFF\" stroke-width=\"4\"/> <circle cx=\"169\" cy=\"211\" r=\"11.5\" fill=\"#5A3A22\" stroke=\"none\"/> <circle cx=\"169\" cy=\"211\" r=\"6\" fill=\"#1A1424\" stroke=\"none\"/> <circle cx=\"174\" cy=\"205\" r=\"3.4\" fill=\"#FFFFFF\" stroke=\"none\"/> <path d=\"M141 203 Q164 182 186 200 M141 203 L130 196\" fill=\"none\" stroke-width=\"8\"/> <ellipse cx=\"236\" cy=\"206\" rx=\"21\" ry=\"23\" fill=\"#FFFFFF\" stroke-width=\"4\"/> <circle cx=\"241\" cy=\"209\" r=\"11.5\" fill=\"#5A3A22\" stroke=\"none\"/> <circle cx=\"241\" cy=\"209\" r=\"6\" fill=\"#1A1424\" stroke=\"none\"/> <circle cx=\"246\" cy=\"203\" r=\"3.4\" fill=\"#FFFFFF\" stroke=\"none\"/> <path d=\"M214 198 Q236 178 259 200 M259 200 L270 192\" fill=\"none\" stroke-width=\"8\"/> <path d=\"M200 228 L193 252 L206 254\" fill=\"none\" stroke-width=\"4\"/> <path d=\"M140 246 l-7 11 M151 246 l-7 11 M162 246 l-7 11 M238 244 l7 11 M249 244 l7 11 M260 244 l7 11\" fill=\"none\" stroke=\"#C84646\" stroke-width=\"3.5\"/> <path d=\"M136 262 Q204 276 272 250 Q258 314 198 318 Q146 314 136 262 Z\" fill=\"#FFFFFF\" stroke-width=\"5\"/> <path d=\"M141 286 Q204 298 266 276\" fill=\"none\" stroke-width=\"3\"/> <path d=\"M156 268 L156 308 M172 271 L172 314 M188 272 L188 317 M204 272 L204 317 M220 269 L220 315 M236 265 L236 311 M252 259 L252 302\" fill=\"none\" stroke-width=\"2.5\"/> <path d=\"M130 256 l9 9 M278 244 l-8 10\" fill=\"none\" stroke-width=\"4\"/> </g> </svg>";
+const MIMG={zackie:new Image(), keelan:new Image()};
+const MANGA={get p(){return MIMG[human];}, get d(){return MIMG[other()];}};
+let msg={text:"",sub:"",t:0,color:C.ink}, lastShot="Hold SHOOT, let go in the green zone";
+let keyJoy=0, touchJoy=0, jumpQueued=false, shootKey=false, shootTouch=false;
+const keys=new Set();
+
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+function zoneFor(x,rim){const xx=rim.dir>0?x:W-x; return xx>THREE?ZONES.inside:(xx>HALF?ZONES.mid:ZONES.far);}
+function rot(lx,ly,a,ox,oy){const c=Math.cos(a),s=Math.sin(a);return {x:ox+lx*c-ly*s,y:oy+lx*s+ly*c};}
+function handPos(e,dir,charging){return rot(charging?dir*4:dir*14, charging?-74:-58, e.lean, e.x, e.y);}
+function shotPath(x0,y0,tx,ty){const T=0.75+Math.abs(tx-x0)/900;return {vx:(tx-x0)/T, vy:(ty-y0-0.5*GB*T*T)/T, T};}
+function targetFor(power,range,auto){
+  const mid=(range[0]+range[1])/2;
+  if(auto) return RR.x+80;
+  if(power>=range[0]&&power<=range[1]) return RR.x;
+  let tx=RR.x+(power-mid)*2.4;
+  if(Math.abs(tx-RR.x)<24) tx=RR.x+(power<mid?-24:24);
+  return tx;
+}
+function say(text,sub,color){msg={text,sub:sub||"",t:1.9,color:color||C.ink};}
+function body(e,dt){if(!e.ground){e.vy+=G*dt;e.y+=e.vy*dt;if(e.y>=FLOOR){e.y=FLOOR;e.vy=0;e.ground=true;}}}
+function pickSpot(){
+  const r=Math.random();
+  if(r<0.6) return 130+Math.random()*140;
+  if(r<0.95) return 300+Math.random()*110;
+  return 430+Math.random()*50;
+}
+
+// who is defending, and is their arm up
+function cpuDefending(){return owner===p || (ball.state==="flight"&&ball.shooter===p);}
+function playerDefending(){return owner===d || (ball.state==="flight"&&ball.shooter===d);}
+function cpuArmUp(){return cpuOn && cpuDefending() && (!d.ground || charge.on || dunk.on || ball.state==="flight");}
+function playerArmUp(){return playerDefending() && (!p.ground || cpu.charging || cdunk.on || ball.state==="flight");}
+function cpuHand(){return {x:d.x-20,y:d.y-84};}
+function playerHand(){return {x:p.x+20,y:p.y-84};}
+
+function inbound(who){
+  ball.state="held"; charge.on=false; cpu.charging=false; d.jumped=false; d.react=null;
+  p.lean=0; d.lean=0; dunk.on=false; cdunk.on=false;
+  p.y=FLOOR; p.vy=0; p.ground=true; d.y=FLOOR; d.vy=0; d.ground=true;
+  if(who==="p"||!cpuOn){owner=p; p.x=380; d.x=440;}
+  else {owner=d; d.x=470; p.x=360; setCpuPlan();}
+}
+function takeBall(e){
+  owner=e; ball.state="held";
+  if(e===d){setCpuPlan(); d.lean=0; say(NAME.d+"'s ball!","Get between it and your hoop. JUMP to block",C.warn);}
+  else {say("Your ball!","Go score on the right hoop",C.info);}
+}
+
+// ---------- player shooting ----------
+function startCharge(){
+  charge.on=true; charge.power=0; charge.holdT=0; charge.zone=zoneFor(p.x,RR);
+  d.jumped=false;
+  // The defender doesn't read your power bar: sometimes he doesn't react at all,
+  // otherwise he guesses a moment to jump somewhere in the hold.
+  // He guesses roughly when you'll let go (from the middle of the sweet spot), with random error.
+  const z=charge.zone, est=(z.n[0]+z.n[1])/200*FILL;
+  d.react = Math.random()<SKILL.noReact ? null : Math.max(0.2, est-0.2+(Math.random()*2-1)*SKILL.timingNoise);
+}
+function release(auto){
+  const z=zoneFor(p.x,RR), range=charge.fade?z.f:z.n, pw=charge.power;
+  const h=handPos(p,1,true);
+  const make=!auto && pw>=range[0] && pw<=range[1];
+  const tx=targetFor(pw,range,auto), sp=shotPath(h.x,h.y,tx,RR.y);
+  const missType=auto?"auto":(pw<range[0]?(pw<range[0]-25?"air":"short"):"long");
+  Object.assign(ball,{state:"flight",x0:h.x,y0:h.y,x:h.x,y:h.y,vx:sp.vx,vy:sp.vy,T:sp.T,t:0,make,pts:z.pts,timer:0,
+    shooter:p,missType,dunk:false,fade:charge.fade,far:z===ZONES.far});
+  owner=null; stats.att++;
+  charge.lastPower=pw; charge.shown=1.2; charge.range=range; charge.zone=z;
+  lastShot = auto ? "Held too long: the ball flew off at 100"
+    : "Let go at "+Math.round(pw)+" · needed "+range[0]+"–"+range[1]+(charge.fade?" (fade-away)":"");
+  charge.on=false;
+}
+// ---------- computer shooting ----------
+function cpuRelease(){
+  const z=zoneFor(d.x,RL), h=handPos(d,-1,true);
+  const chance=z.cpu*(cpu.fade?0.85:1), make=Math.random()<chance;
+  const s=Math.random()<0.5?-1:1, tx=make?RL.x:RL.x+s*(26+Math.random()*34);
+  const sp=shotPath(h.x,h.y,tx,RL.y);
+  const over=(tx-RL.x)*RL.dir>0;
+  Object.assign(ball,{state:"flight",x0:h.x,y0:h.y,x:h.x,y:h.y,vx:sp.vx,vy:sp.vy,T:sp.T,t:0,make,pts:z.pts,timer:0,
+    shooter:d,missType:over?"long":"short",dunk:false,fade:cpu.fade,far:z===ZONES.far});
+  owner=null; cpu.charging=false;
+  lastShot=NAME.d+" shot from "+z.name.toLowerCase()+(cpu.fade?" with a fade-away":"");
+}
+
+// ---------- update ----------
+function update(dt){
+  if(screen!=="play"){updateNets(dt); return;}
+  if(gameOverT>0){gameOverT-=dt; if(gameOverT<=0){endGame(); return;}}
+  if(pendingInbound){inboundT-=dt; if(inboundT<=0){const w=pendingInbound;pendingInbound=null; if(gameOverT<=0) inbound(w);}}
+  const joy=clamp(touchJoy||keyJoy,-1,1);
+  const shootDown=shootKey||shootTouch;
+
+  // player
+  if(!shootDown) needRelease=false;
+  if(dunk.on) updateDunk(dt);
+  else {
+    p.x=clamp(p.x+joy*(charge.on?70:170)*dt,24,812);
+    if(jumpQueued && p.ground){p.vy=-380;p.ground=false;p.dbl=false;}
+    else if(jumpQueued && !p.ground && !p.dbl && playerDefending()){
+      // double jump: only works if the second tap lands near the top of the first jump
+      if(apexWindow()){p.vy=-380; p.dbl=true; dblFx={t:0.45,x:p.x,y:p.y};}
+      else {p.dbl=true; dblMiss=0.6;}
+    }
+    // jump shot hang time: while powering up in the air the player freezes, and drops after the release
+    if(charge.on && !p.ground){p.vy=0;}
+    else body(p,dt);
+  }
+  jumpQueued=false;
+  if(shakeT>0) shakeT-=dt;
+
+  if(owner===p && ball.state==="held" && !dunk.on){
+    if(shootDown && !charge.on && !needRelease && p.ground && inKey(p.x)) startDunk();
+    else if(shootDown && !charge.on && !needRelease) startCharge();
+    if(charge.on){
+      charge.power+=dt/FILL*100; charge.holdT+=dt;
+      charge.fade=joy<-0.35; charge.zone=zoneFor(p.x,RR);
+      if(!shootDown) release(false);
+      else if(charge.power>=100){charge.power=100;release(true);}
+    }
+  } else if(charge.on && owner!==p){charge.on=false;}
+  p.lean+=(((charge.on&&charge.fade)?-0.25:0)-p.lean)*Math.min(1,dt*12);
+  if(charge.shown>0) charge.shown-=dt;
+
+  // computer
+  if(cpuOn) cpuUpdate(dt);
+
+  // ball
+  if(ball.state==="held"){
+    let h;
+    if(owner===p && dunk.on){
+      const a={x:p.x+10,y:p.y-96};
+      if(dunk.t<RISE) h=a;
+      else {const u=Math.min(1,(dunk.t-RISE)/SLAM); h={x:a.x+(RR.x-a.x)*u, y:a.y+(RR.y-6-a.y)*u};}
+    } else if(owner===d && cdunk.on){
+      const a={x:d.x-10,y:d.y-96};
+      if(cdunk.t<RISE) h=a;
+      else {const u=Math.min(1,(cdunk.t-RISE)/SLAM); h={x:a.x+(RL.x-a.x)*u, y:a.y+(RL.y-6-a.y)*u};}
+    } else {
+      const e=owner, dir=e===d?-1:1, charging=e===d?cpu.charging:charge.on;
+      h = (!charging && e.ground) ? dribblePos(e,dir,dt) : handPos(e,dir,charging);
+    }
+    ball.x=h.x; ball.y=h.y; ball.rot=(ball.rot||0)+dt*2.5;
+  } else if(ball.state==="flight"){
+    ball.rot=(ball.rot||0)-Math.sign(ball.vx||1)*9*dt; // backspin
+  }
+  if(ball.state==="free"){ ball.rot=(ball.rot||0)+(ball.vx||0)*dt/8; }
+  else if(ball.state==="made"){ ball.rot=(ball.rot||0)+dt*2; }
+  if(ball.state==="held"){
+  } else if(ball.state==="flight"){
+    ball.t+=dt; const t=ball.t;
+    ball.x=ball.x0+ball.vx*t; ball.y=ball.y0+ball.vy*t+0.5*GB*t*t;
+    const early=t<ball.T*0.55;
+    if(early && ball.shooter===p && cpuArmUp()){
+      const hd=cpuHand();
+      if(Math.hypot(ball.x-hd.x,ball.y-hd.y)<18){blocked(d);return;}
+    }
+    if(early && ball.shooter===d && playerArmUp()){
+      const hd=playerHand();
+      if(Math.hypot(ball.x-hd.x,ball.y-hd.y)<18){blocked(p);return;}
+    }
+    if(t>=ball.T) arrive(t);
+  } else if(ball.state==="free"){
+    ball.timer+=dt;
+    ball.vy+=GB*dt; ball.x+=ball.vx*dt; ball.y+=ball.vy*dt;
+    if(ball.vx>0 && ball.x>RR.board-8 && ball.y>140 && ball.y<202){ball.x=RR.board-8;ball.vx*=-0.5;}
+    if(ball.vx<0 && ball.x<RL.board+15 && ball.y>140 && ball.y<202){ball.x=RL.board+15;ball.vx*=-0.5;}
+    for(const fx of [RR.front,RL.front]){
+      if(Math.hypot(ball.x-fx,ball.y-RR.y)<10){const away=fx===RR.front?-1:1;ball.vx=away*(Math.abs(ball.vx)*0.5+30);ball.vy=-Math.abs(ball.vy)*0.4;netKick(fx===RR.front?1:0,2.5,away*1.5);}
+    }
+    if(ball.x<8){ball.x=8;ball.vx=Math.abs(ball.vx)*0.6;}
+    if(ball.x>836){ball.x=836;ball.vx=-Math.abs(ball.vx)*0.6;}
+    if(ball.y>FLOOR-8){ball.y=FLOOR-8;ball.vy*=-0.6;ball.vx*=0.85;if(Math.abs(ball.vy)<40)ball.vy=0;}
+    if(!cpuOn){ if(ball.timer>1.6) inbound("p"); }
+    else if(ball.timer>0.25){
+      for(const e of [p,d]){
+        if(Math.abs(ball.x-e.x)<24 && ball.y>e.y-92){takeBall(e);break;}
+      }
+      if(ball.state==="free" && ball.timer>6) takeBall(Math.abs(ball.x-p.x)<Math.abs(ball.x-d.x)?p:d);
+    }
+  } else if(ball.state==="made"){
+    // ball slides down through the net, then drops out of the bottom
+    ball.timer+=dt; ball.y+=150*dt;
+    if(ball.y>RR.y+40){ball.state="drop"; ball.vy=170; ball.vx=0;}
+  } else if(ball.state==="drop"){
+    ball.vy+=GB*dt; ball.y+=ball.vy*dt;
+    if(ball.y>FLOOR-8){ball.y=FLOOR-8; ball.vy*=-0.55; if(Math.abs(ball.vy)<40) ball.vy=0;}
+  }
+  updateNets(dt);
+  if(msg.t>0) msg.t-=dt;
+  if(celebrate.t>0) celebrate.t-=dt;
+  if(dblFx.t>0) dblFx.t-=dt;
+  if(cpuFx.t>0) cpuFx.t-=dt;
+  if(dblMiss>0) dblMiss-=dt;
+  for(const s of [moods.p,moods.d]) if(s.t>0){s.t-=dt; if(s.t<=0) s.m="happy";}
+  trackRun(dt);
+}
+function trackRun(dt){
+  for(const e of [p,d]){
+    if(e.lx===undefined) e.lx=e.x;
+    e.spd=(e.x-e.lx)/Math.max(dt,0.001); e.lx=e.x;
+    e.run=(e.run||0)+Math.abs(e.spd)*dt*0.09;
+  }
+}
+
+function startDunk(){
+  Object.assign(dunk,{on:true,t:0,x0:p.x,success:Math.random()<0.5,resolved:false,hang:0});
+  p.ground=false; p.vy=0; needRelease=true; stats.att++; d.jumped=false;
+  lastShot="Dunk attempt · 50% chance";
+}
+function startCpuDunk(){
+  Object.assign(cdunk,{on:true,t:0,x0:d.x,success:Math.random()<SKILL.dunkMake,resolved:false,hang:0});
+  d.ground=false; d.vy=0;
+  lastShot=NAME.d+" is going for the dunk!";
+}
+function updateDunk(dt){ runDunk(dunk,p,1,RR,DUNK_X,dt); }
+function runDunk(dk,e,dir,rim,dunkX,dt){
+  dk.t+=dt; const t=dk.t;
+  if(t<RISE){
+    const u=t/RISE;
+    e.x=dk.x0+(dunkX-dk.x0)*(1-(1-u)*(1-u));
+    e.y=FLOOR-85*Math.sin(u*Math.PI/2);
+  } else if(t<RISE+SLAM){
+    const u=(t-RISE)/SLAM; e.x=dunkX; e.y=FLOOR-85+45*u;
+  } else {
+    if(!dk.resolved) resolveDunk(dk,e,dir,rim,dunkX);
+    const t2=t-RISE-SLAM;
+    if(t2<dk.hang){e.x=dunkX;e.y=FLOOR-40;}
+    else {
+      const u=Math.min(1,(t2-dk.hang)/DROP); e.x=dunkX-dir*10*u; e.y=FLOOR-40+40*u*u;
+      if(u>=1){e.y=FLOOR;e.ground=true;e.vy=0;dk.on=false;}
+    }
+  }
+}
+function resolveDunk(dk,e,dir,rim,dunkX){
+  dk.resolved=true;
+  const byP=e===p;
+  // the defender can stuff a dunk: the CPU has a small chance if it is close,
+  // you get a bigger chance if you are in the air near the rim at the slam
+  const stuffed = byP
+    ? (cpuOn && Math.abs(d.x-dunkX)<80 && Math.random()<SKILL.blockDunk)
+    : (!p.ground && Math.abs(p.x-dunkX)<75 && Math.random()<0.5);
+  if(stuffed){
+    dk.hang=0.02; shakeT=0.15; owner=null; if(byP) stats.streak=0;
+    Object.assign(ball,{state:"free",x:rim.x-dir*14,y:rim.y-10,vx:-dir*(120+Math.random()*60),vy:-120,timer:0,dunk:true});
+    say(pick("block"), byP?"Stuffed at the rim!":"You stuffed "+NAME.d+"'s dunk!", byP?C.warn:C.info);
+    lastShot = byP ? "Your dunk was blocked" : "You blocked "+NAME.d+"'s dunk"; if(!byP) stats.blk++;
+    setMood(e,"shock"); setMood(byP?d:p,"happy"); celebrateFor(byP?d:p);
+    return;
+  }
+  dk.hang=dk.success?0.32:0.02; shakeT=dk.success?0.3:0.12;
+  Object.assign(ball,{shooter:e,make:dk.success,pts:2,far:false,fade:false,dunk:true});
+  if(dk.success){ arrive(0); }
+  else {
+    owner=null; if(byP) stats.streak=0;
+    Object.assign(ball,{state:"free",x:rim.front-dir*4,y:rim.y-8,vx:-dir*(150+Math.random()*90),vy:-280,timer:0});
+    say(pick("dunkMiss"), byP?(cpuOn?"Grab the rebound!":"50/50, try again!"):NAME.d+" missed the dunk! Grab it!", byP?C.warn:C.info);
+    lastShot = byP ? "Dunk missed" : NAME.d+" missed the dunk";
+    setMood(e,"grump");
+  }
+}
+function setCpuPlan(){
+  cpu.charging=false;
+  cpu.dunk=Math.random()<SKILL.dunkTry;
+  cpu.spot=cpu.dunk ? 115+Math.random()*40 : pickSpot();
+}
+function blocked(by){
+  const shooterDir = ball.shooter===p ? 1 : -1;
+  ball.state="free"; ball.vx=shooterDir*60; ball.vy=60; ball.timer=0;
+  if(by===d){
+    stats.streak=0;
+    say(pick("block"),"Blocked! Try a fade-away: pull back while you hold SHOOT",C.warn);
+    lastShot="Blocked by the defender";
+  } else {
+    say(pick("block"),"You blocked it! Grab the ball!",C.info);
+    lastShot="You blocked "+NAME.d; stats.blk++;
+  }
+  setMood(by===d?p:d,"shock"); setMood(by,"happy"); celebrateFor(by);
+}
+function arrive(t){
+  const byP=ball.shooter===p, rim=byP?RR:RL;
+  if(ball.make){
+    ball.state="made"; ball.x=rim.x; ball.y=rim.y; ball.timer=0;
+    netKick(byP?1:0, ball.dunk?9:3, ball.dunk?(byP?2:-2):0); // swish, or a hard yank on a dunk
+    if(byP){
+      stats.score+=ball.pts; stats.made++; if(ball.pts===3) stats.threes++; if(ball.dunk) stats.dunks++; stats.streak++; stats.best=Math.max(stats.best,stats.streak);
+      const cat=ball.dunk?"dunk":(ball.far?"half":(ball.fade?"fade":(stats.streak>=3?"fire":(ball.pts===3?"three":"two"))));
+      say(pick(cat), "+"+ball.pts+(stats.streak>1?" · "+stats.streak+" in a row":""), C.green);
+      setMood(p,"happy"); setMood(d,"grump");
+      if(BIG_PLAYS.includes(cat)) celebrateFor(p);
+    } else {
+      stats.cpu+=ball.pts;
+      const cat=ball.dunk?"dunk":(ball.far?"half":(ball.fade?"fade":(ball.pts===3?"three":"two")));
+      say(pick(cat),NAME.d+" +"+ball.pts,C.warn);
+      setMood(d,"happy"); setMood(p,"grump");
+      if(BIG_PLAYS.includes(cat)) celebrateFor(d);
+    }
+    if(cpuOn && (stats.score>=WIN||stats.cpu>=WIN)){
+      const youWin=stats.score>=WIN;
+      say((youWin?NAME.p:NAME.d).toUpperCase()+" WINS!", stats.score+" – "+stats.cpu, youWin?C.green:C.warn);
+      msg.t=3; gameOverT=3;
+      setMood(youWin?p:d,"happy",3); setMood(youWin?d:p,"grump",3); celebrateFor(youWin?p:d,3);
+    }
+    pendingInbound = cpuOn ? (byP?"d":"p") : "p"; inboundT=1.1;
+  } else {
+    ball.state="free"; ball.vy=ball.vy+GB*t; ball.timer=0;
+    if(byP){
+      stats.streak=0;
+      const tip={auto:"Let go before the bar is full",air:"Way too early, hold a bit longer",short:"A little early, hold longer",long:"A little late, let go sooner"}[ball.missType];
+      say(pick(ball.missType), tip+(cpuOn?" · grab the rebound!":""), C.warn);
+      setMood(p,"grump");
+    } else {
+      say(pick(ball.missType),NAME.d+" missed! Grab the rebound!",C.info);
+      setMood(d,"grump");
+    }
+  }
+}
+
+// a defender jump; about 1 in 3 of them turns into a double jump at the top
+function cpuJump(v){d.vy=v; d.ground=false; d.dbl=false; d.willDbl=Math.random()<SKILL.dblChance;}
+function cpuUpdate(dt){
+  if(cdunk.on){ runDunk(cdunk,d,-1,RL,CPU_DUNK_X,dt); return; }
+  if(owner===d && ball.state==="held"){
+    // attacking the left hoop
+    if(!cpu.charging){
+      const step=SKILL.atkSpeed*dt;
+      if(Math.abs(cpu.spot-d.x)<=step){
+        d.x=cpu.spot;
+        if(cpu.dunk && d.ground){ startCpuDunk(); return; }
+        cpu.charging=true; cpu.t=0; cpu.hold=0.9+Math.random()*0.5;
+        cpu.fade = p.x<d.x && d.x-p.x<75 && Math.random()<SKILL.fadeChance;
+      } else d.x+=Math.sign(cpu.spot-d.x)*step;
+    } else {
+      cpu.t+=dt; if(cpu.fade) d.x=Math.min(d.x+40*dt,800);
+      if(cpu.t>=cpu.hold) cpuRelease();
+    }
+  } else if(ball.state==="free"){
+    const step=SKILL.chaseSpeed*dt;
+    if(Math.abs(ball.x-d.x)>step) d.x+=Math.sign(ball.x-d.x)*step;
+  } else if(owner===p && ball.state==="held"){
+    // defending the right hoop
+    const target=clamp(p.x+60,60,800), step=SKILL.defSpeed*dt;
+    if(Math.abs(target-d.x)<step) d.x=target; else d.x+=Math.sign(target-d.x)*step;
+    const close=d.x>p.x && d.x-p.x<110;
+    // contest a dunk by jumping with it
+    if(dunk.on && !d.jumped && d.ground && Math.abs(d.x-DUNK_X)<90 && dunk.t>0.08){cpuJump(-400);d.jumped=true;}
+    if(charge.on && d.react!==null && !d.jumped && d.ground && charge.holdT>=d.react && close){
+      cpuJump(-380); d.jumped=true;
+    }
+    // sometimes he bites on nothing and jumps anyway
+    if(!charge.on && d.ground && close && Math.random()<0.22*dt){cpuJump(-380);}
+  }
+  // random double jump at the top of a block jump
+  if(!d.ground && d.willDbl && !d.dbl && cpuDefending() && Math.abs(d.vy)<APEX_VY){
+    d.vy=-380; d.dbl=true; cpuFx={t:0.45,x:d.x,y:d.y};
+  }
+  d.lean+=(((cpu.charging&&cpu.fade)?0.25:0)-d.lean)*Math.min(1,dt*12);
+  body(d,dt);
+}
+
+// ---------- drawing ----------
+function rr(x,y,w,h,r){ctx.beginPath(); if(ctx.roundRect) ctx.roundRect(x,y,w,h,r); else ctx.rect(x,y,w,h);}
+function line(x1,y1,x2,y2,col,w){ctx.strokeStyle=col;ctx.lineWidth=w;ctx.lineCap="round";ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();}
+function text(t,x,y,font,col,align){ctx.font=font;ctx.fillStyle=col;ctx.textAlign=align||"left";ctx.textBaseline="middle";ctx.fillText(t,x,y);}
+const DISP=s=>s+'px Bungee, "Arial Black", Impact, sans-serif';
+const BODY=(s,w)=>(w||800)+" "+s+'px Nunito, system-ui, sans-serif';
+const NET=[[2,0,9,26],[13,0,16,26],[27,0,24,26],[38,0,31,26],[5,9,35,9],[7,18,33,18],[9,26,31,26]];
+// ---------- nets: a hanging string mesh that the ball pushes through ----------
+// Each net is a grid of points (top row tied to the rim) joined by diagonal strings that make the
+// diamond pattern. Points move with simple verlet physics, are pulled gently back to their rest
+// shape, and get shoved aside by the ball, so the net bulges, stretches and swings.
+const NET_COLS=6, NET_ROWS=5;
+function makeNet(rimX){
+  const pts=[], links=[];
+  for(let r=0;r<=NET_ROWS;r++){
+    const w=40-(r/NET_ROWS)*17;               // tapers toward the bottom
+    for(let c=0;c<=NET_COLS;c++){
+      const x=rimX+20+(c/NET_COLS-0.5)*w, y=189+r*6.6;
+      pts.push({x,y,px:x,py:y,rx:x,ry:y,fixed:r===0});
+    }
+  }
+  const id=(r,c)=>r*(NET_COLS+1)+c;
+  const link=(a,b,front)=>{const A=pts[a],B=pts[b]; links.push({a,b,len:Math.hypot(A.x-B.x,A.y-B.y),front});};
+  for(let r=0;r<NET_ROWS;r++) for(let c=0;c<=NET_COLS;c++){
+    if(c<NET_COLS){ link(id(r,c),id(r+1,c+1),true); link(id(r,c+1),id(r+1,c),false); }
+    if(c===0||c===NET_COLS) link(id(r,c),id(r+1,c),true);   // side edges
+  }
+  for(let c=0;c<NET_COLS;c++) link(id(NET_ROWS,c),id(NET_ROWS,c+1),true); // bottom hem
+  return {pts,links};
+}
+const NETS=[makeNet(67),makeNet(737)];
+function netKick(i,down,side){
+  for(const pt of NETS[i].pts){ if(pt.fixed) continue; const k=(pt.ry-189)/(NET_ROWS*6.6);
+    pt.py-=down*k; pt.px-=(side||0)*k; }
+}
+function updateNets(dt){
+  const loose=ball.state!=="held";
+  for(const net of NETS){
+    for(const pt of net.pts){
+      if(pt.fixed) continue;
+      const vx=(pt.x-pt.px)*0.9, vy=(pt.y-pt.py)*0.9;
+      pt.px=pt.x; pt.py=pt.y;
+      pt.x+=vx; pt.y+=vy+260*dt*dt;
+      pt.x+=(pt.rx-pt.x)*0.07; pt.y+=(pt.ry-pt.y)*0.07;
+      if(loose){
+        const dx=pt.x-ball.x, dy=pt.y-ball.y, dd=Math.hypot(dx,dy);
+        if(dd<10.5 && dd>0.01){pt.x=ball.x+dx/dd*10.5; pt.y=ball.y+dy/dd*10.5;}
+      }
+    }
+    for(let it=0;it<3;it++) for(const L of net.links){
+      const A=net.pts[L.a], B=net.pts[L.b], dx=B.x-A.x, dy=B.y-A.y, dd=Math.hypot(dx,dy)||1;
+      if(dd<=L.len*1.08) continue;                  // strings can go slack but not stretch much
+      const f=(dd-L.len*1.08)/dd*0.5;
+      if(!A.fixed){A.x+=dx*f; A.y+=dy*f;}
+      if(!B.fixed){B.x-=dx*f; B.y-=dy*f;}
+    }
+  }
+}
+function drawNetLayer(front){
+  ctx.lineCap="round";
+  ctx.strokeStyle=front?"rgba(250,248,242,0.95)":"rgba(205,212,228,0.55)";
+  ctx.lineWidth=front?1.4:1.1;
+  ctx.beginPath();
+  for(const net of NETS) for(const L of net.links){
+    if(L.front!==front) continue;
+    const A=net.pts[L.a], B=net.pts[L.b];
+    ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y);
+  }
+  ctx.stroke();
+  if(front){ // little knots where the strings cross
+    ctx.fillStyle="rgba(250,248,242,0.9)";
+    for(const net of NETS) for(const pt of net.pts){ if(pt.fixed) continue; ctx.fillRect(pt.x-0.8,pt.y-0.8,1.6,1.6); }
+  }
+}
+function drawHoop(side){
+  const L=side==="L";
+  const poleX=L?32:804, armX=L?38:782, boardX=L?60:777, rimX=L?67:737;
+  ctx.fillStyle=C.steel; ctx.fillRect(poleX,168,8,142); ctx.fillRect(armX,168,24,6);
+  ctx.fillStyle=C.chalk; rr(boardX,140,7,62,2); ctx.fill();
+  ctx.fillStyle=C.ball; rr(rimX,184,40,5,3); ctx.fill();
+  // net hooks under the rim
+  ctx.fillStyle=C.chalk; for(let i=0;i<=NET_COLS;i++) ctx.fillRect(rimX+20+(i/NET_COLS-0.5)*40-1,188,2,3);
+}
+function drawCourt(){
+  ctx.fillStyle=C.court; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle=C.stands; ctx.fillRect(0,170,W,140);
+  ctx.fillStyle=C.row; for(const y of [206,242,278]) ctx.fillRect(0,y,W,2);
+  ctx.fillStyle=C.floor; ctx.fillRect(0,FLOOR,W,H-FLOOR);
+  ctx.fillStyle=C.chalk; ctx.fillRect(0,FLOOR,W,4);
+  ctx.fillStyle=C.floorLine; ctx.fillRect(0,342,W,2); ctx.fillRect(0,370,W,2);
+  ctx.globalAlpha=0.55; ctx.fillStyle=C.p2; ctx.fillRect(40,314,120,10);
+  ctx.globalAlpha=0.7; ctx.fillStyle=C.p1; ctx.fillRect(684,314,120,10); ctx.globalAlpha=1;
+  ctx.fillStyle=C.chalk; ctx.fillRect(420,300,4,24); ctx.fillRect(290,306,4,20); ctx.fillRect(550,306,4,20);
+  text("3PT",292,333,DISP(11),C.wood,"center"); text("3PT",552,333,DISP(11),C.wood,"center");
+  const hot=owner===p && ball.state==="held" && inKey(p.x);
+  if(hot){ctx.fillStyle=C.p1; ctx.fillRect(KEY.x0,314,KEY.x1-KEY.x0,10);}
+  text("DUNK ZONE",(KEY.x0+KEY.x1)/2,333,DISP(11),hot?C.p1:C.wood,"center");
+  drawHoop("L"); drawHoop("R");
+}
+function shadow(e){ if(!e.ground){ctx.fillStyle="rgba(0,0,0,0.3)";ctx.beginPath();ctx.ellipse(e.x,FLOOR,18,4,0,0,Math.PI*2);ctx.fill();} }
+// ---------- athletes ----------
+const LOOK={
+  // blue #11: short golden-blond crop, blue-grey eyes, big gap-toothed grin, ears that stick out a bit
+  p:{dir:1,jersey:"#2F6FE4",trim:"#FFFFFF",shorts:"#2457B8",skin:"#F2C6A8",skinDark:"#D9A285",
+     hair:"#C9A15A",hairHi:"#E6C784",brow:"#A88445",eye:"#6E8A9A",style:"crop",gapTeeth:true,bigEars:true,
+     num:"11",numCol:"#FFFFFF",shoe:"#FFFFFF",sole:"#1B2340",sock:"#FFFFFF"},
+  // yellow #3: brown hair swept back into a tall quiff with short sides, brown eyes, cheeky smile
+  d:{dir:-1,jersey:"#FFC93C",trim:"#1B2340",shorts:"#E2A91E",skin:"#F0C3A7",skinDark:"#D4A086",
+     hair:"#6B4A32",hairHi:"#9A7556",brow:"#4A3020",eye:"#5A3A22",style:"quiff",gapTeeth:false,bigEars:false,
+     num:"3",numCol:"#1B2340",shoe:"#1B2340",sole:"#F3EDE0",sock:"#F3EDE0"}
+};
+// ---------- the two boys, their kits, and saved progress ----------
+const BOYS={
+  zackie:{name:"Zackie",num:"11",skin:"#F2C6A8",skinDark:"#D9A285",hair:"#C9A15A",hairHi:"#E6C784",brow:"#A88445",
+    eye:"#6E8A9A",style:"crop",gapTeeth:true,bigEars:true},
+  keelan:{name:"Keelan",num:"3",skin:"#F0C3A7",skinDark:"#D4A086",hair:"#6B4A32",hairHi:"#9A7556",brow:"#4A3020",
+    eye:"#5A3A22",style:"quiff",gapTeeth:false,bigEars:false}
+};
+const MAINS={blue:"#2F6FE4",green:"#1FA35B",purple:"#7B4FD6",red:"#E03A3A",black:"#22232B",white:"#F4F4F1",yellow:"#FFC93C"};
+const TRIMS={white:"#FFFFFF",green:"#1FA35B",red:"#E03A3A",yellow:"#FFC93C",blue:"#2F6FE4",purple:"#7B4FD6",black:"#22232B",navy:"#1B2340"};
+const kits={zackie:{main:"blue",trim:"white"},keelan:{main:"yellow",trim:"navy"}};
+let human="zackie", wins={zackie:0,keelan:0};
+const NAME={p:"Zackie",d:"Keelan"};
+function other(){return human==="zackie"?"keelan":"zackie";}
+function hex2rgb(h){const n=parseInt(h.slice(1),16);return [n>>16&255,n>>8&255,n&255];}
+function mix(a,b,t){const A=hex2rgb(a),B=hex2rgb(b);return "#"+A.map((v,i)=>Math.round(v+(B[i]-v)*t).toString(16).padStart(2,"0")).join("");}
+function isLight(h){const [r,g,b]=hex2rgb(h);return (0.2126*r+0.7152*g+0.0722*b)/255>0.6;}
+function inkOn(bg){return isLight(bg)?"#1B2340":"#FFFFFF";}
+function kitLook(b,k,dir){
+  const main=MAINS[k.main], trim=TRIMS[k.trim];
+  return Object.assign({},b,{dir,jersey:main,trim,shorts:mix(main,"#000000",0.18),numCol:trim,shoe:"#FFFFFF",sole:"#1B2340",sock:"#FFFFFF"});
+}
+function niceKit(k){const c=s=>s[0].toUpperCase()+s.slice(1);return c(k.main)+" with "+k.trim+" trim";}
+// recolour the manga portrait to match a boy's chosen kit
+function mangaSrc(boy){
+  const k=kits[boy], main=MAINS[k.main], trim=TRIMS[k.trim], light=mix(main,"#FFFFFF",0.28);
+  const outline=isLight(trim)?"#1A1424":"#FFFFFF";
+  const sw=(s,a,b)=>s.split(a).join(b);
+  let s;
+  if(boy==="zackie"){
+    s=sw(sw(MANGA_SVG_Z,"#2F6FE4",main),"#5C8EEA",light);
+    s=sw(s,'stroke="#FFFFFF" stroke-width="7"','stroke="'+trim+'" stroke-width="7"');
+    s=sw(s,'stroke="#FFFFFF" stroke-width="6"','stroke="'+trim+'" stroke-width="6"');
+    s=sw(s,'fill="#FFFFFF" stroke="#1A1424" stroke-width="5" paint-order="stroke">11','fill="'+trim+'" stroke="'+outline+'" stroke-width="5" paint-order="stroke">11');
+  } else {
+    s=sw(sw(MANGA_SVG_K,"#FFC93C",main),"#FFDB7A",light);
+    s=sw(s,'stroke="#1B2340" stroke-width="7"','stroke="'+trim+'" stroke-width="7"');
+    s=sw(s,'stroke="#1B2340" stroke-width="6"','stroke="'+trim+'" stroke-width="6"');
+    s=sw(s,'fill="#1B2340" stroke="#FFFFFF" stroke-width="5" paint-order="stroke">3','fill="'+trim+'" stroke="'+outline+'" stroke-width="5" paint-order="stroke">3');
+  }
+  return "data:image/svg+xml;charset=utf-8,"+encodeURIComponent(s);
+}
+function refreshManga(boy){MIMG[boy].src=mangaSrc(boy);}
+// sets up both players' looks, colours and names for the chosen kits and who is playing
+function applyLooks(){
+  const o=other();
+  LOOK.p=kitLook(BOYS[human],kits[human],1);
+  LOOK.d=kitLook(BOYS[o],kits[o],-1);
+  C.p1=MAINS[kits[human].main]; C.p2=MAINS[kits[o].main];
+  NAME.p=BOYS[human].name; NAME.d=BOYS[o].name;
+  refreshManga("zackie"); refreshManga("keelan");
+}
+const SAVE_KEY="hoops4life";
+function loadSave(){
+  try{
+    const s=JSON.parse(localStorage.getItem(SAVE_KEY)||"null");
+    if(!s) return;
+    for(const b of ["zackie","keelan"]) if(s.kits&&s.kits[b]&&MAINS[s.kits[b].main]&&TRIMS[s.kits[b].trim]) kits[b]=s.kits[b];
+    if(BOYS[s.human]) human=s.human;
+    if(s.wins) wins=Object.assign({zackie:0,keelan:0},s.wins);
+  }catch(_){}
+}
+function saveGame(){try{localStorage.setItem(SAVE_KEY,JSON.stringify({kits,human,wins}));}catch(_){}}
+
+// ---------- screens: title, setup, play, pause, game over ----------
+let screen="title", mode="vs", overWinner="p", ui=[];
+function startGame(){
+  applyLooks();
+  Object.assign(stats,{score:0,cpu:0,made:0,att:0,streak:0,best:0,threes:0,dunks:0,blk:0});
+  cpuOn = mode==="vs";
+  pendingInbound=null; gameOverT=0; celebrate.t=0; charge.shown=0; dblFx.t=0; cpuFx.t=0;
+  moods.p.m=moods.d.m="happy"; moods.p.t=moods.d.t=0;
+  touchJoy=0; shootTouch=false; shootKey=false; needRelease=true;
+  lastShot="Hold SHOOT, let go in the green zone";
+  inbound("p"); screen="play";
+  if(cpuOn) say(NAME.p+" vs "+NAME.d,"First to "+WIN+" wins",C.ink);
+  else say("Shooting practice",NAME.p+", shoot as much as you like",C.ink);
+}
+function endGame(){
+  const youWin=stats.score>=WIN; overWinner=youWin?"p":"d";
+  if(youWin) wins[human]=(wins[human]||0)+1;
+  saveGame(); screen="over";
+}
+function openSetup(m){mode=m; screen="setup";}
+function tryStart(){ if(mode==="vs" && kits.zackie.main===kits.keelan.main) return; saveGame(); startGame(); }
+function button(x,y,w,h,label,o,fn){
+  o=o||{};
+  ctx.globalAlpha=o.disabled?0.45:1;
+  ctx.fillStyle=o.fill||C.panel; rr(x,y,w,h,14); ctx.fill();
+  if(o.outline){ctx.strokeStyle=o.outline; ctx.lineWidth=2; ctx.stroke();}
+  const ink=o.ink||C.ink;
+  text(label,x+w/2,y+h/2+(o.sub?-7:1),BODY(o.size||17,900),ink,"center");
+  if(o.sub) text(o.sub,x+w/2,y+h/2+11,BODY(11,800),ink,"center");
+  ctx.globalAlpha=1;
+  if(!o.disabled && fn) ui.push({x,y,w,h,fn});
+}
+function shade(a){ctx.fillStyle="rgba(10,14,30,"+a+")"; ctx.fillRect(0,0,W,H);}
+// blinking on the title screen: eye centres and sizes in the manga drawings (x, y, half-width, half-height)
+const EYES={zackie:[[164,208,22,25],[236,208,22,25]], keelan:[[164,208,21,22],[236,206,21,23]]};
+const BLINK={zackie:{next:1.2,start:-9}, keelan:{next:2.6,start:-9}};
+function blinkAmount(boy){
+  // each boy blinks on his own random timer, now and then a quick double blink
+  const now=performance.now()/1000, b=BLINK[boy];
+  if(now>=b.next){b.start=now; b.next=now+(Math.random()<0.25?0.32:2+Math.random()*3.5);}
+  const ph=(now-b.start)/0.2;
+  return ph<0.5?ph*2:(ph<1?(1-ph)*2:0);
+}
+function drawLids(boy,cx,cy,r,u){
+  const k=2*r/260, skin=BOYS[boy].skin;
+  for(const [ex,ey,rx,ry] of EYES[boy]){
+    const X=cx-r+(ex-70)*k, Y=cy-r+(ey-8)*k, RX=(rx+3)*k, RY=(ry+3)*k, edge=Y-RY+2*RY*u;
+    ctx.save(); ctx.beginPath(); ctx.ellipse(X,Y,RX,RY,0,0,Math.PI*2); ctx.clip();
+    ctx.fillStyle=skin; ctx.fillRect(X-RX,Y-RY,RX*2,edge-(Y-RY)); ctx.restore();
+    ctx.strokeStyle="#1A1424"; ctx.lineCap="round";
+    if(u>0.9){ // fully shut: a curved closed-eye line
+      ctx.lineWidth=5*k; ctx.beginPath(); ctx.moveTo(X-RX*0.95,Y); ctx.quadraticCurveTo(X,Y+RY*0.45,X+RX*0.95,Y); ctx.stroke();
+    } else {
+      const t=(edge-Y)/RY, half=RX*Math.sqrt(Math.max(0,1-t*t));
+      ctx.lineWidth=4*k; ctx.beginPath(); ctx.moveTo(X-half,edge); ctx.lineTo(X+half,edge); ctx.stroke();
+    }
+  }
+}
+function portraitBadge(boy,cx,cy,r,blink){
+  const col=MAINS[kits[boy].main], img=MIMG[boy];
+  ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle=col; ctx.fill(); ctx.clip();
+  if(img.complete && img.naturalWidth){
+    ctx.drawImage(img,70,8,260,260,cx-r,cy-r,r*2,r*2);
+    if(blink){const u=blinkAmount(boy); if(u>0.02) drawLids(boy,cx,cy,r,u);}
+  }
+  ctx.restore();
+  ctx.strokeStyle=C.ink; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
+}
+function bigTitle(t,x,y,size,align){
+  ctx.font=DISP(size); ctx.textAlign=align||"center"; ctx.textBaseline="middle";
+  ctx.lineWidth=7; ctx.lineJoin="round"; ctx.strokeStyle=C.navy; ctx.strokeText(t,x,y);
+  ctx.fillStyle=C.warn; ctx.fillText(t,x,y);
+}
+function drawTitle(){
+  ui=[]; drawCourt(); drawNetLayer(false); drawNetLayer(true); shade(0.72);
+  portraitBadge("zackie",140,196,92,true); text(BOYS.zackie.name.toUpperCase(),140,306,DISP(18),C.ink,"center");
+  portraitBadge("keelan",W-140,196,92,true); text(BOYS.keelan.name.toUpperCase(),W-140,306,DISP(18),C.ink,"center");
+  bigTitle("HOOPS 4 LIFE",W/2,58,48);
+  text(BOYS.zackie.name+" vs "+BOYS.keelan.name,W/2,98,BODY(16,900),C.muted,"center");
+  const bx=W/2-160, bw=320;
+  button(bx,122,bw,50,"1 v 1 vs COMPUTER",{fill:"#2F6FE4",sub:"First to "+WIN},()=>openSetup("vs"));
+  button(bx,180,bw,50,"SHOOTING PRACTICE",{fill:"#F26B1D",ink:C.navy,sub:"No defender"},()=>openSetup("practice"));
+  button(bx,238,bw,42,"TABLE MODE",{disabled:true,sub:"2 players, 1 phone · coming soon"});
+  button(bx,288,bw,42,"TWO PHONES",{disabled:true,sub:"2 players over Wi-Fi · coming soon"});
+  text("Wins vs the computer:  "+BOYS.zackie.name+" "+(wins.zackie||0)+"  ·  "+BOYS.keelan.name+" "+(wins.keelan||0),W/2,358,BODY(14,900),C.muted,"center");
+}
+function swatch(cx,cy,r,col,sel,disabled,fn){
+  ctx.globalAlpha=disabled?0.25:1;
+  if(sel){ctx.strokeStyle=C.warn; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(cx,cy,r+4,0,Math.PI*2); ctx.stroke();}
+  ctx.fillStyle=col; ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle="rgba(255,255,255,0.7)"; ctx.lineWidth=1.5; ctx.stroke();
+  if(disabled){ctx.strokeStyle=C.ink; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(cx-r*0.7,cy+r*0.7); ctx.lineTo(cx+r*0.7,cy-r*0.7); ctx.stroke();}
+  ctx.globalAlpha=1;
+  if(!disabled) ui.push({x:cx-r-3,y:cy-r-3,w:2*r+6,h:2*r+6,fn});
+}
+function playerCard(boy,x,y,w,h){
+  const sel=boy===human, k=kits[boy], b=BOYS[boy];
+  ui.push({x,y,w,h,fn:()=>{human=boy;}});
+  ctx.fillStyle=sel?"rgba(46,56,102,0.98)":"rgba(27,35,64,0.95)"; rr(x,y,w,h,18); ctx.fill();
+  ctx.strokeStyle=sel?C.warn:"rgba(255,255,255,0.15)"; ctx.lineWidth=sel?4:2; ctx.stroke();
+  // player preview in his kit
+  ctx.save(); rr(x,y,w,h,18); ctx.clip();
+  ctx.fillStyle=MAINS[k.main]; ctx.globalAlpha=0.18; ctx.beginPath(); ctx.arc(x+80,y+h-60,74,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1;
+  ctx.translate(x+80,y+h-12); ctx.scale(1.95,1.95);
+  drawAthlete({x:0,y:0,lean:0,spd:0,run:0},kitLook(b,k,1),{x:14,y:-34},{x:-12,y:-26},false,false);
+  ctx.restore();
+  const tag=sel?"PLAYING":(mode==="vs"?"COMPUTER":"WATCHING");
+  ctx.fillStyle=sel?C.warn:C.panel; rr(x+12,y+12,100,24,12); ctx.fill();
+  text(tag,x+62,y+24,BODY(12,900),sel?C.navy:C.muted,"center");
+  const tx=x+160;
+  text(b.name.toUpperCase(),tx,y+30,DISP(24),C.ink); text("#"+b.num,x+w-16,y+30,DISP(20),C.muted,"right");
+  text("JERSEY",tx,y+62,BODY(12,900),C.muted);
+  Object.keys(MAINS).forEach((m,i)=>swatch(tx+14+i*31,y+86,12,MAINS[m],k.main===m,false,()=>{
+    k.main=m; if(TRIMS[k.trim]===MAINS[m]) k.trim=(m==="white"?"navy":"white"); refreshManga(boy);
+  }));
+  text("TRIM",tx,y+120,BODY(12,900),C.muted);
+  Object.keys(TRIMS).forEach((t,i)=>{const same=TRIMS[t]===MAINS[k.main];
+    swatch(tx+13+i*27,y+144,10,TRIMS[t],k.trim===t,same,()=>{k.trim=t; refreshManga(boy);});});
+  text(niceKit(k),tx,y+180,BODY(14,900),C.ink);
+  text(sel?"Ready to play":"Tap the card to "+(mode==="vs"?"play as ":"pick ")+b.name,tx,y+h-22,BODY(12,800),sel?C.warn:C.muted);
+}
+function drawSetup(){
+  ui=[]; drawCourt(); shade(0.8);
+  text(mode==="vs"?"WHO'S PLAYING?":"WHO'S PRACTISING?",W/2,26,DISP(22),C.warn,"center");
+  text(mode==="vs"?"Tap a card to play as him. The other one is the computer. Pick jersey and trim colours.":"Tap a card to pick who practises, and choose the kit.",W/2,47,BODY(13,800),C.muted,"center");
+  playerCard("zackie",22,62,390,262);
+  playerCard("keelan",432,62,390,262);
+  const clash=mode==="vs" && kits.zackie.main===kits.keelan.main;
+  button(22,336,130,42,"BACK",{},()=>{screen="title";});
+  if(clash) text("Pick different jersey colours",W/2,357,BODY(14,900),C.warn,"center");
+  button(W-22-210,336,210,42,"START",{fill:"#F26B1D",ink:C.navy,disabled:clash},tryStart);
+}
+function drawPause(){
+  ui=[]; shade(0.75);
+  bigTitle("PAUSED",W/2,92,40);
+  const bx=W/2-150;
+  button(bx,134,300,50,"RESUME",{fill:"#2F6FE4"},()=>{screen="play"; needRelease=true;});
+  button(bx,194,300,44,"RESTART",{outline:"rgba(255,255,255,0.3)"},()=>startGame());
+  button(bx,248,300,44,"MAIN MENU",{outline:"rgba(255,255,255,0.3)"},()=>{screen="title";});
+}
+function drawOver(){
+  ui=[]; shade(0.84);
+  const youWin=overWinner==="p", boy=youWin?human:other();
+  portraitBadge(boy,180,186,112);
+  let size=40; ctx.font=DISP(size);
+  const head=(youWin?NAME.p:NAME.d).toUpperCase()+" WINS!";
+  while(size>24 && ctx.measureText(head).width>470){size-=2; ctx.font=DISP(size);}
+  bigTitle(head,330,62,size,"left");
+  text(NAME.p+"  "+stats.score+"  –  "+stats.cpu+"  "+NAME.d,332,104,BODY(20,900),C.ink);
+  text(NAME.p.toUpperCase()+"'S GAME",332,140,BODY(12,900),C.muted);
+  const rows=[["Shots made",stats.made+" / "+stats.att],["3-pointers",String(stats.threes)],["Dunks",String(stats.dunks)],
+    ["Blocks",String(stats.blk)],["Best streak",String(stats.best)],["Wins vs computer",String(wins[human]||0)]];
+  rows.forEach(([l,v],i)=>{const cx=332+(i%2)*236, cy=168+Math.floor(i/2)*38;
+    ctx.fillStyle="rgba(46,56,102,0.9)"; rr(cx,cy-15,224,32,10); ctx.fill();
+    text(l,cx+12,cy+1,BODY(14,800),C.muted); text(v,cx+212,cy+2,DISP(16),C.ink,"right");});
+  button(332,312,220,50,"REMATCH",{fill:"#F26B1D",ink:C.navy},()=>startGame());
+  button(564,312,140,50,"MENU",{outline:"rgba(255,255,255,0.3)"},()=>{screen="title";});
+}
+
+// two-segment limb from a joint to an end point, bending the middle joint toward (px,py)
+function limb(sx,sy,ex,ey,L,prefX,prefY,w1,w2,col){
+  const dx=ex-sx, dy=ey-sy, dist=Math.hypot(dx,dy)||1;
+  let mx=sx+dx/2, my=sy+dy/2;
+  if(dist<2*L){
+    const h=Math.sqrt(L*L-(dist/2)*(dist/2)); let nx=-dy/dist, ny=dx/dist;
+    if(nx*prefX+ny*prefY<0){nx=-nx;ny=-ny;}
+    mx+=nx*h; my+=ny*h;
+  }
+  line(sx,sy,mx,my,col,w1); line(mx,my,ex,ey,col,w2);
+  return {mx,my};
+}
+function drawAthlete(e,lk,hand,other,air,hang){
+  const dir=lk.dir;
+  ctx.save(); ctx.translate(e.x,e.y); ctx.rotate(e.lean);
+  // feet targets: standing, running stride, tucked in the air, or dangling from the rim
+  let ff, bf;
+  const moving=Math.abs(e.spd||0)>15;
+  if(hang){ff={x:dir*3,y:2};bf={x:-dir*3,y:0};}
+  else if(air){ff={x:dir*8,y:-9};bf={x:-dir*3,y:-4};}
+  else if(moving){const s=Math.sin(e.run||0), c=Math.cos(e.run||0);
+    ff={x:s*9,y:-Math.max(0,c)*6}; bf={x:-s*9,y:-Math.max(0,-c)*6};}
+  else {ff={x:dir*5,y:0};bf={x:-dir*4,y:0};}
+  const hipF={x:dir*4,y:-26}, hipB={x:-dir*3,y:-26};
+  const shF={x:dir*6,y:-47}, shB={x:-dir*6,y:-47};
+  // back arm and back leg sit behind the body
+  limb(shB.x,shB.y,other.x,other.y,17,0,1,5.5,5,lk.skinDark);
+  ctx.fillStyle=lk.skinDark; ctx.beginPath(); ctx.arc(other.x,other.y,3.4,0,Math.PI*2); ctx.fill();
+  const legs=[[hipB,bf,lk.skinDark],[hipF,ff,lk.skin]];
+  for(const [hp,ft,col] of legs){
+    limb(hp.x,hp.y,ft.x,ft.y-4,13,dir,0,6.5,5.5,col);
+    line(ft.x,ft.y-4,ft.x,ft.y-9,lk.sock,5);
+    ctx.fillStyle=lk.sole; ctx.beginPath(); ctx.ellipse(ft.x+dir*3,ft.y-1,7,2.4,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle=lk.shoe; ctx.beginPath(); ctx.ellipse(ft.x+dir*2.5,ft.y-3.5,6.5,3.4,0,0,Math.PI*2); ctx.fill();
+  }
+  // shorts
+  ctx.fillStyle=lk.shorts; ctx.beginPath();
+  ctx.moveTo(-11,-33); ctx.lineTo(11,-33); ctx.lineTo(13,-19); ctx.lineTo(1.5,-19); ctx.lineTo(0,-23); ctx.lineTo(-1.5,-19); ctx.lineTo(-13,-19); ctx.closePath(); ctx.fill();
+  ctx.fillStyle=lk.trim; ctx.fillRect(11.2,-31,1.6,11); ctx.fillRect(-12.8,-31,1.6,11);
+  // neck
+  ctx.fillStyle=lk.skin; ctx.fillRect(-3.5,-59,7,10);
+  // tank-top jersey
+  ctx.fillStyle=lk.jersey; ctx.beginPath();
+  ctx.moveTo(-8,-51); ctx.lineTo(-4.5,-51); ctx.lineTo(0,-46); ctx.lineTo(4.5,-51); ctx.lineTo(8,-51);
+  ctx.quadraticCurveTo(10,-44,12,-42); ctx.lineTo(11,-30); ctx.lineTo(-11,-30); ctx.lineTo(-12,-42);
+  ctx.quadraticCurveTo(-10,-44,-8,-51); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle=lk.trim; ctx.lineWidth=1.4; ctx.beginPath();
+  ctx.moveTo(-4.5,-51); ctx.lineTo(0,-46); ctx.lineTo(4.5,-51);
+  ctx.moveTo(8,-51); ctx.quadraticCurveTo(10,-44,12,-42); ctx.moveTo(-8,-51); ctx.quadraticCurveTo(-10,-44,-12,-42); ctx.stroke();
+  ctx.font=DISP(lk.num.length>1?9:10); ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.lineWidth=2.5; ctx.strokeStyle=lk.trim===lk.numCol?lk.jersey:lk.trim; ctx.strokeText(lk.num,0,-37);
+  ctx.fillStyle=lk.numCol; ctx.fillText(lk.num,0,-37);
+  drawHead(lk,dir);
+  // front arm on top
+  limb(shF.x,shF.y,hand.x,hand.y,17,0,1,6,5.2,lk.skin);
+  ctx.fillStyle=lk.skin; ctx.beginPath(); ctx.arc(hand.x,hand.y,3.6,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+// Big cartoon head in a three-quarter view, facing the way the player plays.
+function drawHead(lk,dir,mood){
+  mood=mood||moodOf(lk);
+  const hx=dir*1.5, hy=-67, R=12;
+  // face
+  ctx.fillStyle=lk.skin; ctx.beginPath(); ctx.ellipse(hx,hy,R,R*1.05,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle=lk.skinDark; ctx.lineWidth=1; ctx.stroke();
+  // ear on the back side of the head
+  const ew=lk.bigEars?3.8:3.1, eh=lk.bigEars?5.2:4.4;
+  ctx.fillStyle=lk.skin; ctx.beginPath(); ctx.ellipse(hx-dir*10,hy+1.5,ew,eh,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle=lk.skinDark; ctx.stroke();
+  ctx.fillStyle=lk.skinDark; ctx.beginPath(); ctx.ellipse(hx-dir*10,hy+1.5,ew*0.45,eh*0.5,0,0,Math.PI*2); ctx.fill();
+  // hair
+  ctx.fillStyle=lk.hair; ctx.beginPath();
+  if(lk.style==="quiff"){
+    ctx.moveTo(hx-dir*12.5,hy+2);
+    ctx.quadraticCurveTo(hx-dir*14,hy-10,hx-dir*6,hy-16);
+    ctx.quadraticCurveTo(hx+dir*2,hy-23,hx+dir*11,hy-18);
+    ctx.quadraticCurveTo(hx+dir*14.5,hy-13.5,hx+dir*11.5,hy-8);
+    ctx.quadraticCurveTo(hx+dir*5,hy-9.5,hx-dir*1,hy-8.5);
+    ctx.quadraticCurveTo(hx-dir*7,hy-7.5,hx-dir*7.5,hy+1);
+    ctx.closePath(); ctx.fill();
+    // swept-back shine
+    ctx.strokeStyle=lk.hairHi; ctx.lineWidth=1.2; ctx.beginPath();
+    ctx.moveTo(hx+dir*9,hy-17); ctx.quadraticCurveTo(hx+dir*1,hy-19,hx-dir*8,hy-12);
+    ctx.moveTo(hx+dir*10,hy-12.5); ctx.quadraticCurveTo(hx+dir*2,hy-14.5,hx-dir*9,hy-7);
+    ctx.stroke();
+  } else {
+    ctx.moveTo(hx-dir*12.5,hy+2);
+    ctx.quadraticCurveTo(hx-dir*14,hy-12,hx-dir*2,hy-14.5);
+    ctx.quadraticCurveTo(hx+dir*10,hy-15,hx+dir*12.5,hy-6);
+    ctx.lineTo(hx+dir*10,hy-5); ctx.lineTo(hx+dir*8,hy-7.5); ctx.lineTo(hx+dir*5,hy-5.5);
+    ctx.lineTo(hx+dir*2,hy-7.5); ctx.lineTo(hx-dir*1,hy-5.5);
+    ctx.quadraticCurveTo(hx-dir*7,hy-6,hx-dir*7.5,hy+1);
+    ctx.closePath(); ctx.fill();
+    // short spiky texture
+    ctx.strokeStyle=lk.hairHi; ctx.lineWidth=1; ctx.beginPath();
+    for(let i=0;i<4;i++){const x=hx+dir*(-6+i*4.5); ctx.moveTo(x,hy-12.5); ctx.lineTo(x+dir*2,hy-9);}
+    ctx.stroke();
+  }
+  // eyebrows: happy, shocked (raised) or grumpy (angled down)
+  ctx.strokeStyle=lk.brow; ctx.lineWidth=1.6; ctx.lineCap="round"; ctx.beginPath();
+  if(mood==="grump"){ctx.moveTo(hx+dir*1,hy-5.6); ctx.lineTo(hx+dir*4.8,hy-3.8); ctx.moveTo(hx+dir*7.2,hy-3.8); ctx.lineTo(hx+dir*10,hy-5.4);}
+  else if(mood==="shock"){ctx.moveTo(hx+dir*1,hy-6); ctx.lineTo(hx+dir*4.8,hy-7); ctx.moveTo(hx+dir*7.2,hy-7); ctx.lineTo(hx+dir*10,hy-6);}
+  else {ctx.moveTo(hx+dir*1,hy-4.5); ctx.lineTo(hx+dir*4.8,hy-5.2); ctx.moveTo(hx+dir*7.2,hy-5.2); ctx.lineTo(hx+dir*10,hy-4.4);}
+  ctx.stroke();
+  // eyes: near eye bigger than far eye
+  const big=mood==="shock"?1.25:1;
+  for(const [ex,s] of [[hx+dir*3,1],[hx+dir*8.6,0.85]]){
+    ctx.fillStyle="#FFFFFF"; ctx.beginPath(); ctx.ellipse(ex,hy-1.5,2.5*s*big,(mood==="grump"?1.4:2)*s*big,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle=lk.eye; ctx.beginPath(); ctx.arc(ex+dir*0.6,hy-1.4,1.45*s,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#141414"; ctx.beginPath(); ctx.arc(ex+dir*0.7,hy-1.4,0.7*s,0,Math.PI*2); ctx.fill();
+  }
+  // nose
+  ctx.strokeStyle=lk.skinDark; ctx.lineWidth=1.2; ctx.beginPath();
+  ctx.moveTo(hx+dir*6.6,hy); ctx.quadraticCurveTo(hx+dir*9.6,hy+3,hx+dir*7,hy+3.6); ctx.stroke();
+  // rosy cheeks
+  ctx.fillStyle="rgba(232,120,120,0.3)";
+  ctx.beginPath(); ctx.arc(hx+dir*0.5,hy+3.5,2.6,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(hx+dir*10,hy+3.5,1.8,0,Math.PI*2); ctx.fill();
+  // mouth: big grin, shocked "O" or grumpy frown
+  const mx=hx+dir*5.3, my=hy+5.4;
+  if(mood==="shock"){
+    ctx.fillStyle="#8E2A2A"; ctx.beginPath(); ctx.ellipse(mx,my+1.6,2.2,2.8,0,0,Math.PI*2); ctx.fill();
+  } else if(mood==="grump"){
+    ctx.strokeStyle="#8E2A2A"; ctx.lineWidth=1.4; ctx.beginPath(); ctx.moveTo(mx-3.4,my+2.6); ctx.quadraticCurveTo(mx,my-0.4,mx+3.4,my+2.6); ctx.stroke();
+  } else {
+    ctx.fillStyle="#8E2A2A"; ctx.beginPath(); ctx.moveTo(mx-4.4,my); ctx.quadraticCurveTo(mx,my+6,mx+4.4,my); ctx.closePath(); ctx.fill();
+    ctx.fillStyle="#FFFFFF"; ctx.beginPath(); ctx.moveTo(mx-3.8,my+0.3); ctx.lineTo(mx+3.8,my+0.3); ctx.lineTo(mx+3.2,my+2); ctx.lineTo(mx-3.2,my+2); ctx.closePath(); ctx.fill();
+    if(lk.gapTeeth){ctx.fillStyle="#8E2A2A"; ctx.fillRect(mx-0.4,my+0.3,0.9,1.8);}
+    ctx.strokeStyle="#B4534E"; ctx.lineWidth=0.9; ctx.beginPath(); ctx.moveTo(mx-4.4,my); ctx.quadraticCurveTo(mx,my+6,mx+4.4,my); ctx.stroke();
+  }
+}
+// round face badge for the scoreboard, using the same flat head
+function faceBadge(lk,cx,cy,r,bg){
+  ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
+  ctx.fillStyle=bg; ctx.fill(); ctx.clip();
+  const k=r/14.5; ctx.translate(cx,cy+r*0.18); ctx.scale(k,k); ctx.translate(-lk.dir*1.5,67);
+  ctx.fillStyle=lk.skin; ctx.fillRect(-3.5,-59,7,12);
+  drawHead(lk,lk.dir);
+  ctx.restore();
+  ctx.strokeStyle="rgba(255,255,255,0.85)"; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
+}
+function drawPlayer(){
+  shadow(p);
+  let hx=12, hy=-26, ox=-12, oy=-24;
+  if(dunk.on){
+    if(dunk.t<RISE){hx=10;hy=-96;ox=-16;oy=-66;}
+    else if(dunk.t<RISE+SLAM+dunk.hang || !dunk.resolved){hx=12;hy=-86;ox=-14;oy=-64;}
+    else {hx=16;hy=-70;ox=-16;oy=-60;}
+  }
+  else if(owner===p && ball.state==="held"){
+    if(charge.on||!p.ground){hx=charge.on?4:14; hy=charge.on?-74:-58;}
+    else {hx=15; hy=Math.min(-24,ball.y-p.y-9);} // hand follows the dribble
+  }
+  else if(playerArmUp()){hx=20; hy=-84;}
+  const hang=dunk.on && dunk.resolved && dunk.t-RISE-SLAM<dunk.hang;
+  drawAthlete(p,LOOK.p,{x:hx,y:hy},{x:ox,y:oy},!p.ground,hang);
+}
+function drawCpu(){
+  if(!cpuOn) return;
+  shadow(d);
+  let hx=-16, hy=-24, ox=16, oy=-24;
+  if(cdunk.on){
+    if(cdunk.t<RISE){hx=-10;hy=-96;ox=16;oy=-66;}
+    else if(cdunk.t<RISE+SLAM+cdunk.hang || !cdunk.resolved){hx=-12;hy=-86;ox=14;oy=-64;}
+    else {hx=-16;hy=-70;ox=16;oy=-60;}
+  }
+  else if(owner===d && ball.state==="held"){
+    if(cpu.charging||!d.ground){hx=cpu.charging?-4:-14; hy=cpu.charging?-74:-58;}
+    else {hx=-15; hy=Math.min(-24,ball.y-d.y-9);}
+  }
+  else if(cpuArmUp()){hx=-20; hy=-84;}
+  const hang=cdunk.on && cdunk.resolved && cdunk.t-RISE-SLAM<cdunk.hang;
+  drawAthlete(d,LOOK.d,{x:hx,y:hy},{x:ox,y:oy},!d.ground,hang);
+}
+// pebbled leather texture: fixed dot pattern inside the ball, reused every frame
+const PEBBLES=Array.from({length:26},(_,i)=>{const a=i*2.399, r=Math.sqrt((i+0.5)/26)*7; return [Math.cos(a)*r,Math.sin(a)*r];});
+function drawBall(){
+  const R=8, x=ball.x, y=ball.y;
+  // soft shadow on the floor, smaller and fainter the higher the ball is
+  const hgt=FLOOR-(y+R);
+  if(hgt>2 && ball.state!=="made"){
+    const k=Math.max(0.25,1-hgt/220);
+    ctx.fillStyle="rgba(0,0,0,"+(0.32*k).toFixed(3)+")";
+    ctx.beginPath(); ctx.ellipse(x,FLOOR+1,R*1.1*k+2,2.6*k,0,0,Math.PI*2); ctx.fill();
+  }
+  ctx.save(); ctx.translate(x,y);
+  // shaded leather: light from the top left
+  const g=ctx.createRadialGradient(-3,-3.5,0.5,0,0,R);
+  g.addColorStop(0,"#FFA45C"); g.addColorStop(0.5,"#EE6A1C"); g.addColorStop(1,"#A9410C");
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.fill();
+  ctx.save(); ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.clip();
+  ctx.rotate(ball.rot||0);
+  ctx.fillStyle="rgba(90,30,0,0.22)";
+  for(const [px,py] of PEBBLES){ctx.fillRect(px-0.35,py-0.35,0.7,0.7);}
+  // the eight-panel seam pattern: a cross plus two curved side seams
+  ctx.strokeStyle="#2A1206"; ctx.lineWidth=1.05; ctx.lineCap="round";
+  ctx.beginPath();
+  ctx.moveTo(-R,0); ctx.lineTo(R,0);
+  ctx.moveTo(0,-R); ctx.lineTo(0,R);
+  ctx.moveTo(-R*0.62,-R*0.82); ctx.quadraticCurveTo(-R*0.18,0,-R*0.62,R*0.82);
+  ctx.moveTo(R*0.62,-R*0.82); ctx.quadraticCurveTo(R*0.18,0,R*0.62,R*0.82);
+  ctx.stroke();
+  ctx.restore();
+  // shine and rim
+  ctx.fillStyle="rgba(255,255,255,0.35)"; ctx.beginPath(); ctx.ellipse(-3,-3.6,2.4,1.4,-0.6,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle="#6E2A06"; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.stroke();
+  ctx.restore();
+}
+// dribbling: the ball bounces between the hand and the floor beside the player
+function dribblePos(e,dir,dt){
+  e.drib=(e.drib||0)+dt*(7+Math.min(6,Math.abs(e.spd||0)*0.03));
+  const u=Math.abs(Math.cos(e.drib)), top=e.y-42, low=FLOOR-8;
+  return {x:e.x+dir*15, y:low+(top-low)*u};
+}
+function drawPreview(){
+  if(!charge.on) return;
+  const z=zoneFor(p.x,RR), range=charge.fade?z.f:z.n, h=handPos(p,1,true);
+  const tx=targetFor(charge.power,range,false), sp=shotPath(h.x,h.y,tx,RR.y);
+  ctx.fillStyle="rgba(255,255,255,0.85)";
+  for(let i=1;i<=18;i++){const t=sp.T*i/18;ctx.beginPath();ctx.arc(h.x+sp.vx*t,h.y+sp.vy*t+0.5*GB*t*t,2.6,0,Math.PI*2);ctx.fill();}
+}
+function drawMeter(){
+  if(!(charge.on||charge.shown>0)) return;
+  const z=charge.zone||zoneFor(p.x,RR), fade=charge.on?charge.fade:false;
+  const range=charge.on?(fade?z.f:z.n):(charge.range||z.n);
+  const pw=charge.on?charge.power:charge.lastPower;
+  const x=140,y=86,w=30,h=180;
+  text("POWER",x,y-12,BODY(12,900),C.ink);
+  ctx.fillStyle=C.panel; rr(x,y,w,h,8); ctx.fill();
+  ctx.save(); rr(x,y,w,h,8); ctx.clip();
+  ctx.fillStyle=C.ball; ctx.fillRect(x,y+h*(1-pw/100),w,h*pw/100);
+  if(fade){ctx.setLineDash([4,4]);ctx.strokeStyle="rgba(255,255,255,0.6)";ctx.lineWidth=2;const a=z.n;ctx.strokeRect(x+1,y+h*(1-a[1]/100),w-2,h*(a[1]-a[0])/100);ctx.setLineDash([]);}
+  const by=y+h*(1-range[1]/100), bh=h*(range[1]-range[0])/100;
+  ctx.fillStyle="rgba(61,220,151,0.8)"; ctx.fillRect(x,by,w,bh);
+  ctx.fillStyle=C.ink; ctx.fillRect(x,by-1.5,w,3); ctx.fillRect(x,by+bh-1.5,w,3);
+  ctx.fillStyle=C.red; ctx.fillRect(x,y,w,4);
+  ctx.restore();
+  text("100",x+38,y+2,BODY(11,900),"#FF8A8A");
+  text(String(range[1]),x+38,by-3,BODY(11,900),C.green);
+  text(String(range[0]),x+38,by+bh+5,BODY(11,900),C.green);
+  text(Math.round(pw)+"%",x,y+h+16,DISP(16),(pw>=range[0]&&pw<=range[1])?C.green:C.ink);
+  text(z.name.toUpperCase()+(fade?" · FADE":""),x,y+h+36,BODY(11,900),C.muted);
+}
+function drawHUD(){
+  ctx.fillStyle=C.panel; rr(PAUSE_BTN.x,PAUSE_BTN.y,PAUSE_BTN.w,PAUSE_BTN.h,12); ctx.fill();
+  ctx.fillStyle=C.ink; ctx.fillRect(29,25,5,18); ctx.fillRect(38,25,5,18);
+  const pill=(x,w,lk,bg,name,score)=>{
+    const ink=inkOn(bg);
+    ctx.fillStyle=bg; rr(x,14,w,40,20); ctx.fill();
+    ctx.strokeStyle="rgba(255,255,255,0.35)"; ctx.lineWidth=1.5; ctx.stroke();
+    faceBadge(lk,x+20,34,17,mix(bg,"#FFFFFF",0.3));
+    text(name.toUpperCase(),x+43,34,BODY(13,900),ink); text(String(score),x+w-10,35,DISP(24),ink,"right");
+  };
+  pill(64,166,LOOK.p,C.p1,NAME.p,stats.score);
+  if(cpuOn) pill(238,166,LOOK.d,C.p2,NAME.d,stats.cpu);
+  const px=cpuOn?412:238, pw=W-16-px, cx=px+pw/2;
+  ctx.fillStyle="rgba(46,56,102,0.95)"; rr(px,14,pw,40,12); ctx.fill();
+  if(cpuOn && playerDefending()){
+    text("DEFENSE · FIRST TO "+WIN,cx,26,BODY(11,900),C.warn,"center");
+    text("Stay in front, JUMP to block, tap again at the top for a double jump",cx,42,BODY(12,900),C.ink,"center");
+  } else if(cpuOn && owner!==p && ball.state==="free"){
+    text("LOOSE BALL!",cx,26,BODY(11,900),C.warn,"center");
+    text("Run to the ball to grab it",cx,42,BODY(13,900),C.ink,"center");
+  } else if(owner===p && inKey(p.x)){
+    text((cpuOn?"YOUR BALL · ":"PRACTICE · ")+"DUNK ZONE",cx,26,BODY(11,900),C.muted,"center");
+    text("Tap DUNK · 50% chance to slam it in",cx,42,BODY(13,900),C.ink,"center");
+  } else {
+    const z=zoneFor(p.x,RR);
+    text((cpuOn?"YOUR BALL · ":"PRACTICE · ")+z.name.toUpperCase(),cx,26,BODY(11,900),C.muted,"center");
+    text("sweet spot "+z.n[0]+"–"+z.n[1]+" · fade "+z.f[0]+"–"+z.f[1],cx,42,BODY(13,900),C.ink,"center");
+  }
+  ctx.font=BODY(13,800); const tw=ctx.measureText(lastShot).width+28;
+  ctx.fillStyle="rgba(27,35,64,0.92)"; rr(W/2-tw/2-20,352,tw,28,10); ctx.fill();
+  text(lastShot,W/2-20,366,BODY(13,800),C.ink,"center");
+}
+function drawControls(){
+  ctx.fillStyle="rgba(27,35,64,0.8)"; ctx.beginPath(); ctx.arc(JOY.x,JOY.y,JOY.r,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle="rgba(255,255,255,0.5)"; ctx.lineWidth=3; ctx.stroke();
+  ctx.strokeStyle=C.ink; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.moveTo(JOY.x-34,JOY.y-7); ctx.lineTo(JOY.x-41,JOY.y); ctx.lineTo(JOY.x-34,JOY.y+7);
+  ctx.moveTo(JOY.x+34,JOY.y-7); ctx.lineTo(JOY.x+41,JOY.y); ctx.lineTo(JOY.x+34,JOY.y+7); ctx.stroke();
+  const jx=JOY.x+clamp(touchJoy||keyJoy,-1,1)*26;
+  ctx.fillStyle=C.chalk; ctx.beginPath(); ctx.arc(jx,JOY.y,24,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle=(charge.on&&charge.fade)?C.warn:C.ink; ctx.lineWidth=3; ctx.stroke();
+  ctx.fillStyle=p.ground?"rgba(46,56,102,0.9)":"rgba(61,220,151,0.5)"; ctx.beginPath(); ctx.arc(JUMP.x,JUMP.y,JUMP.r,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle=playerDefending()?C.warn:"rgba(255,255,255,0.5)"; ctx.lineWidth=3; ctx.stroke();
+  line(JUMP.x,JUMP.y+2,JUMP.x,JUMP.y-14,C.ink,3);
+  ctx.beginPath(); ctx.moveTo(JUMP.x-7,JUMP.y-8); ctx.lineTo(JUMP.x,JUMP.y-15); ctx.lineTo(JUMP.x+7,JUMP.y-8); ctx.stroke();
+  if(apexWindow()){ // tap now for the double jump
+    ctx.fillStyle=C.green; ctx.beginPath(); ctx.arc(JUMP.x,JUMP.y,JUMP.r,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle=C.ink; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(JUMP.x,JUMP.y,JUMP.r+5,0,Math.PI*2); ctx.stroke();
+    text("AGAIN!",JUMP.x,JUMP.y+1,DISP(12),C.navy,"center");
+  } else
+  text(playerDefending()?"BLOCK":"JUMP",JUMP.x,JUMP.y+14,BODY(11,900),C.ink,"center");
+  const canShoot=owner===p && ball.state==="held" && !dunk.on;
+  const dunkReady=canShoot && !charge.on && p.ground && inKey(p.x);
+  const down=(shootKey||shootTouch)&&canShoot;
+  ctx.globalAlpha=canShoot?1:0.4;
+  if(dunkReady){
+    const pulse=4+Math.sin(performance.now()/120)*3;
+    ctx.strokeStyle=C.info; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(SHOOT.x,SHOOT.y,SHOOT.r+pulse,0,Math.PI*2); ctx.stroke();
+    ctx.fillStyle=C.info; ctx.beginPath(); ctx.arc(SHOOT.x,SHOOT.y,SHOOT.r,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle=C.ink; ctx.lineWidth=3; ctx.stroke();
+    text("DUNK!",SHOOT.x,SHOOT.y+1,DISP(15),C.ink,"center");
+  } else {
+    ctx.fillStyle=C.ball; ctx.beginPath(); ctx.arc(SHOOT.x,SHOOT.y,down?39:SHOOT.r,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle=down?C.warn:C.seam; ctx.lineWidth=4; ctx.stroke();
+    text("SHOOT",SHOOT.x,SHOOT.y+1,DISP(14),C.navy,"center");
+  }
+  ctx.globalAlpha=1;
+}
+function drawCelebration(){
+  const who=celebrate.who, img=MANGA[who], col=who==="p"?C.p1:C.p2;
+  const age=celebrate.T-celebrate.t, pop=Math.min(1,age*6), bounce=pop<1?pop:1+Math.sin(Math.min(age-0.17,0.3)*10)*0.04;
+  ctx.save(); ctx.globalAlpha=Math.min(1,celebrate.t*2.5);
+  ctx.translate(W/2,150); ctx.scale(bounce,bounce); ctx.translate(-W/2,-150);
+  const x=W/2-280, y=72, w=560, h=156;
+  ctx.fillStyle="rgba(16,21,43,0.92)"; rr(x,y,w,h,24); ctx.fill();
+  ctx.strokeStyle=col; ctx.lineWidth=5; ctx.stroke();
+  // manga portrait in a badge that breaks out of the panel
+  const cx=x+86, cy=y+h/2-6, r=72;
+  ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle=col; ctx.fill(); ctx.clip();
+  if(img.complete && img.naturalWidth) ctx.drawImage(img,70,8,260,260,cx-r,cy-r,r*2,r*2);
+  ctx.restore();
+  ctx.strokeStyle=C.ink; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
+  // commentary next to the face
+  const tx=x+178, maxW=w-196;
+  let size=34; ctx.font=DISP(size);
+  while(size>18 && ctx.measureText(msg.text).width>maxW){size-=2;ctx.font=DISP(size);}
+  text(msg.text,tx,y+62,DISP(size),msg.color,"left");
+  if(msg.sub){
+    let s2=15; ctx.font=BODY(s2,900);
+    while(s2>11 && ctx.measureText(msg.sub).width>maxW){s2--;ctx.font=BODY(s2,900);}
+    text(msg.sub,tx,y+104,BODY(s2,900),C.ink,"left");
+  }
+  ctx.restore();
+}
+function drawMsg(){
+  if(msg.t<=0) return;
+  if(celebrate.t>0 && celebrate.who){drawCelebration(); return;}
+  ctx.globalAlpha=Math.min(1,msg.t*2);
+  let size=34; ctx.font=DISP(size);
+  while(size>18 && ctx.measureText(msg.text).width>560){size-=2;ctx.font=DISP(size);}
+  const mainW=ctx.measureText(msg.text).width;
+  ctx.font=BODY(15,900); const subW=msg.sub?ctx.measureText(msg.sub).width:0;
+  const bw=Math.max(mainW,subW)+40;
+  ctx.fillStyle="rgba(16,21,43,0.82)"; rr(W/2-bw/2,100,bw,msg.sub?80:56,16); ctx.fill();
+  text(msg.text,W/2,128,DISP(size),msg.color,"center");
+  if(msg.sub) text(msg.sub,W/2,160,BODY(15,900),C.ink,"center");
+  ctx.globalAlpha=1;
+}
+function drawGame(){
+  ctx.save();
+  if(shakeT>0){ctx.translate((Math.random()-0.5)*7,(Math.random()-0.5)*7);}
+  drawCourt(); drawNetLayer(false); drawCpu();
+  for(const fx of [dblFx,cpuFx]) if(fx.t>0){ // burst rings under the feet where a double jump kicked off
+    const u=1-fx.t/0.45;
+    ctx.globalAlpha=1-u; ctx.strokeStyle=C.green; ctx.lineWidth=3;
+    for(const k of [1,0.6]){ctx.beginPath(); ctx.ellipse(fx.x,fx.y,(10+u*34)*k,(3+u*9)*k,0,0,Math.PI*2); ctx.stroke();}
+    ctx.globalAlpha=1;
+  }
+  drawPlayer(); drawBall(); drawNetLayer(true);
+  if(dblFx.t>0){ctx.globalAlpha=Math.min(1,dblFx.t*4); text("DOUBLE JUMP!",p.x,p.y-112,DISP(14),C.green,"center"); ctx.globalAlpha=1;}
+  if(dblMiss>0){ctx.globalAlpha=Math.min(1,dblMiss*3); text("Too early or late!",p.x,p.y-112,BODY(13,900),C.warn,"center"); ctx.globalAlpha=1;}
+  if(dunk.on && dunk.t<RISE+0.05){ // speed lines on the way up
+    ctx.strokeStyle="rgba(255,255,255,0.5)"; ctx.lineWidth=2;
+    for(let i=0;i<3;i++){ctx.beginPath();ctx.moveTo(p.x-22-i*6,p.y-20-i*14);ctx.lineTo(p.x-40-i*6,p.y+4-i*14);ctx.stroke();}
+  }
+  if(cdunk.on && cdunk.t<RISE+0.05){
+    ctx.strokeStyle="rgba(255,255,255,0.5)"; ctx.lineWidth=2;
+    for(let i=0;i<3;i++){ctx.beginPath();ctx.moveTo(d.x+22+i*6,d.y-20-i*14);ctx.lineTo(d.x+40+i*6,d.y+4-i*14);ctx.stroke();}
+  }
+  ctx.restore();
+  drawMeter(); drawHUD(); drawControls(); drawMsg();
+}
+
+function draw(){
+  ctx.save();
+  if(screen==="title") drawTitle();
+  else if(screen==="setup") drawSetup();
+  else {
+    drawGame();
+    if(screen==="pause") drawPause();
+    else if(screen==="over") drawOver();
+  }
+  ctx.restore();
+}
+
+// ---------- input ----------
+const roles=new Map();
+function toLocal(e){const r=cv.getBoundingClientRect();return {x:(e.clientX-r.left)/r.width*W,y:(e.clientY-r.top)/r.height*H};}
+cv.addEventListener("pointerdown",e=>{
+  const q=toLocal(e); let role=null;
+  if(screen!=="play"){
+    for(let i=ui.length-1;i>=0;i--){const u=ui[i];
+      if(q.x>=u.x&&q.x<=u.x+u.w&&q.y>=u.y&&q.y<=u.y+u.h){u.fn();break;}}
+    e.preventDefault(); return;
+  }
+  if(q.x>=PAUSE_BTN.x-6&&q.x<=PAUSE_BTN.x+PAUSE_BTN.w+6&&q.y>=PAUSE_BTN.y-6&&q.y<=PAUSE_BTN.y+PAUSE_BTN.h+6){
+    screen="pause"; touchJoy=0; shootTouch=false; roles.clear(); e.preventDefault(); return;
+  }
+  if(Math.hypot(q.x-SHOOT.x,q.y-SHOOT.y)<SHOOT.r+18){role="shoot";shootTouch=true;}
+  else if(Math.hypot(q.x-JUMP.x,q.y-JUMP.y)<JUMP.r+12){role="jump";jumpQueued=true;}
+  else if(q.x<HALF && q.y>200){role="joy";touchJoy=clamp((q.x-JOY.x)/40,-1,1);}
+  if(role){roles.set(e.pointerId,role);try{cv.setPointerCapture(e.pointerId);}catch(_){}}
+  e.preventDefault();
+});
+cv.addEventListener("pointermove",e=>{
+  if(roles.get(e.pointerId)==="joy"){const q=toLocal(e);touchJoy=clamp((q.x-JOY.x)/40,-1,1);}
+});
+function endPointer(e){
+  const role=roles.get(e.pointerId);
+  if(role==="joy") touchJoy=0;
+  if(role==="shoot") shootTouch=false;
+  roles.delete(e.pointerId);
+}
+cv.addEventListener("pointerup",endPointer); cv.addEventListener("pointercancel",endPointer);
+cv.addEventListener("contextmenu",e=>e.preventDefault());
+function keyJoyUpdate(){keyJoy=((keys.has("ArrowRight")||keys.has("d"))?1:0)-((keys.has("ArrowLeft")||keys.has("a"))?1:0);}
+cv.addEventListener("keydown",e=>{
+  const k=e.key.length===1?e.key.toLowerCase():e.key;
+  if(["ArrowLeft","ArrowRight","ArrowUp"," ","a","d","w","k"].includes(k)) e.preventDefault();
+  if(e.repeat) return;
+  if(k==="Escape"||k==="p"){ if(screen==="play") screen="pause"; else if(screen==="pause") screen="play"; return; }
+  if(k==="Enter"){
+    if(screen==="title") openSetup("vs"); else if(screen==="setup") tryStart();
+    else if(screen==="over") startGame(); else if(screen==="pause") screen="play";
+    return;
+  }
+  keys.add(k); keyJoyUpdate();
+  if(k==="ArrowUp"||k==="w") jumpQueued=true;
+  if(k===" "||k==="k") shootKey=true;
+});
+cv.addEventListener("keyup",e=>{
+  const k=e.key.length===1?e.key.toLowerCase():e.key;
+  keys.delete(k); keyJoyUpdate();
+  if(k===" "||k==="k") shootKey=false;
+});
+cv.addEventListener("blur",()=>{keys.clear();keyJoy=0;shootKey=false;});
+
+// ---------- loop ----------
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(0.033,(now-last)/1000); last=now;
+  update(dt); draw(); requestAnimationFrame(frame);
+}
+loadSave(); applyLooks(); fit(); inbound("p"); screen="title";
+requestAnimationFrame(frame);
+try{cv.focus({preventScroll:true});}catch(_){}
+})();
+</script>
+
+<script>
+// install support: register the offline worker
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+}
+</script>
+</body>
+</html>
