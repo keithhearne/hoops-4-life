@@ -762,7 +762,9 @@ let mapScroll=null, mapDrag=null;   // null = not set yet; the map opens scrolle
 function upY(r,i){return BOTTOM_PAD+r*((STOPS-1)*STOP_GAP+ROAD_GAP)+i*STOP_GAP;}   // height above the bottom of the map
 function mapContentH(){return upY(ROADS.length-1,STOPS-1)+STOP_R+30;}
 function stopPos(r,i){ // map-local position of stop i (0-6) on road r; stops alternate sides to make the zig-zag
-  return {x:MAP.x+(i%2===0?62:MAP.w-62), y:mapContentH()-upY(r,i)};
+  // first and last stop sit in the middle; the ones between alternate right and left
+  const x = (i===0||i===STOPS-1) ? MAP.w/2 : (i%2===1 ? MAP.w-62 : 62);
+  return {x:MAP.x+x, y:mapContentH()-upY(r,i)};
 }
 function mapMaxScroll(){return Math.max(0,mapContentH()-MAP.h);}
 function scrollMap(dy){mapScroll=clamp(mapScroll+dy,0,mapMaxScroll());}
