@@ -756,23 +756,26 @@ function bigTitle(t,x,y,size,align){
 // ---------- road map: zig-zag roads of numbered stops, scrolled up and down ----------
 const MAP={x:16,y:16,w:476,h:358};
 const ROADS=[{name:"ROAD 1",col:"#2F6FE4"},{name:"ROAD 2",col:"#F26B1D"},{name:"ROAD 3",col:"#1FA35B"}];
-const STOPS=7, STOP_GAP=58, STOP_R=20, ROAD_GAP=96, ROAD_TOP=46;
-let mapScroll=0, mapDrag=null;
-function roadTop(r){return 18+r*((STOPS-1)*STOP_GAP+ROAD_TOP+ROAD_GAP);}
+const STOPS=7, STOP_GAP=58, STOP_R=20, ROAD_GAP=110, BOTTOM_PAD=62;
+let mapScroll=null, mapDrag=null;   // null = not set yet; the map opens scrolled to the bottom, where road 1 starts
+// roads climb upward: road 1 at the bottom, stop 1 at the bottom of each road
+function upY(r,i){return BOTTOM_PAD+r*((STOPS-1)*STOP_GAP+ROAD_GAP)+i*STOP_GAP;}   // height above the bottom of the map
+function mapContentH(){return upY(ROADS.length-1,STOPS-1)+STOP_R+30;}
 function stopPos(r,i){ // map-local position of stop i (0-6) on road r; stops alternate sides to make the zig-zag
-  return {x:MAP.x+(i%2===0?84:MAP.w-84), y:roadTop(r)+ROAD_TOP+i*STOP_GAP};
+  return {x:MAP.x+(i%2===0?84:MAP.w-84), y:mapContentH()-upY(r,i)};
 }
-function mapMaxScroll(){return Math.max(0,stopPos(ROADS.length-1,STOPS-1).y+STOP_R+34-MAP.h);}
+function mapMaxScroll(){return Math.max(0,mapContentH()-MAP.h);}
 function scrollMap(dy){mapScroll=clamp(mapScroll+dy,0,mapMaxScroll());}
 function drawRoadMap(){
+  if(mapScroll===null) mapScroll=mapMaxScroll();
   ctx.save();
   ctx.fillStyle="rgba(16,21,43,0.96)"; rr(MAP.x,MAP.y,MAP.w,MAP.h,18); ctx.fill();
   ctx.strokeStyle="rgba(255,255,255,0.14)"; ctx.lineWidth=2; ctx.stroke();
   rr(MAP.x,MAP.y,MAP.w,MAP.h,18); ctx.clip();
   ctx.translate(0,MAP.y-mapScroll);
   ROADS.forEach((road,r)=>{
-    const top=roadTop(r);
-    text(road.name,MAP.x+MAP.w/2,top+12,DISP(16),C.ink,"center");
+    const start=stopPos(r,0);
+    text(road.name,MAP.x+MAP.w/2,start.y+34,DISP(16),C.ink,"center");   // label under stop 1, where the road begins
     // the road: a straight line from each stop to the next
     ctx.strokeStyle=road.col; ctx.lineWidth=5; ctx.lineCap="round"; ctx.lineJoin="round";
     ctx.beginPath();
