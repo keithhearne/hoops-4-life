@@ -87,6 +87,7 @@ const COMMENTS={
   auto:["Held it too long! It's in orbit!","Houston, we have a problem!","Let GO next time!","That one's going to space!"],
   block:["REJECTED!","Not in my house!","Get that outta here!","Return to sender!","DENIED!"],
   dunk:["SLAM DUNK!","BOOM! Throw it DOWN!","Posterized!","Hang on that rim!","MONSTER JAM!","Rattled the backboard!"],
+  windmill:["WINDMILL DUNK!"],
   save:["SAVED!","What a save!","Goalkeeper!","Not today!","Swatted at the rim!","Denied at the door!"],
   steal:["PICKPOCKET!","STOLEN!","Hand in the cookie jar!","Too slow!","Snatched it!","MINE NOW!"],
   stealMiss:["Missed the steal!","Just missed it!","Swipe and a miss!","He held on!"],
@@ -133,7 +134,7 @@ const cdunk={on:false,t:0,x0:0,success:false,resolved:false,hang:0};
 // How good the computer is. Raise or lower these to tune it.
 const SKILL_BASE={acc:1, noReact:0.2, timingNoise:0.35, defSpeed:160, chaseSpeed:178, atkSpeed:135, fadeChance:0.65,
   dunkTry:0.3, dunkMake:0.5, blockDunk:0.25, dblChance:0.33};
-SKILL_BASE.stealChance=0.45; SKILL_BASE.saveChance=0.25;
+SKILL_BASE.stealChance=0.45; SKILL_BASE.windTry=0.25; SKILL_BASE.saveChance=0.25;
 let SKILL=Object.assign({},SKILL_BASE);   // the quick 1 v 1 game uses SKILL_BASE; each level sets its own
 const CPU_DUNK_X=W-DUNK_X;
 let shakeT=0, needRelease=false;
@@ -148,7 +149,7 @@ function moodOf(lk){return (lk.dir>0?moods.p:moods.d).m;}
 function setMood(e,m,t){const s=e===p?moods.p:moods.d; s.m=m; s.t=t||2.2;}
 // celebration pop-up with the manga portrait of whoever made the big play
 let celebrate={who:null,t:0,T:2.2};
-const BIG_PLAYS=["dunk","three","half","fire"];
+const BIG_PLAYS=["dunk","windmill","three","half","fire"];
 function celebrateFor(e,t){celebrate={who:e===p?"p":"d",t:t||2.2,T:t||2.2};}
 const MANGA_SVG_Z="<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"400\" height=\"480\" viewBox=\"0 0 400 480\"> <defs><clipPath id=\"clipA\"><rect width=\"400\" height=\"480\" rx=\"20\"/></clipPath></defs> <g clip-path=\"url(#clipA)\" stroke=\"#1A1424\" stroke-linejoin=\"round\" stroke-linecap=\"round\"> <rect width=\"400\" height=\"480\" fill=\"#2F6FE4\" stroke=\"none\"/> <path d=\"M200 190 L900.0 190.0 L894.2 279.7 Z M200 190 L871.6 387.2 L840.8 471.7 Z M200 190 L788.9 568.4 L735.5 640.8 Z M200 190 L658.4 719.0 L586.8 773.4 Z M200 190 L490.8 826.7 L406.8 858.8 Z M200 190 L299.6 882.9 L210.0 889.9 Z M200 190 L100.4 882.9 L12.4 864.4 Z M200 190 L-90.8 826.7 L-170.0 784.2 Z M200 190 L-258.4 719.0 L-322.4 655.9 Z M200 190 L-388.9 568.4 L-432.5 489.9 Z M200 190 L-471.6 387.2 L-491.4 299.5 Z M200 190 L-500.0 190.0 L-494.2 100.3 Z M200 190 L-471.6 -7.2 L-440.8 -91.7 Z M200 190 L-388.9 -188.4 L-335.5 -260.8 Z M200 190 L-258.4 -339.0 L-186.8 -393.4 Z M200 190 L-90.8 -446.7 L-6.8 -478.8 Z M200 190 L100.4 -502.9 L190.0 -509.9 Z M200 190 L299.6 -502.9 L387.6 -484.4 Z M200 190 L490.8 -446.7 L570.0 -404.2 Z M200 190 L658.4 -339.0 L722.4 -275.9 Z M200 190 L788.9 -188.4 L832.5 -109.9 Z M200 190 L871.6 -7.2 L891.4 80.5 Z \" fill=\"#5C8EEA\" stroke=\"none\"/> <path d=\"M30 480 C40 410 90 380 160 366 L240 366 C310 380 360 410 370 480 Z\" fill=\"#F2C6A8\" stroke-width=\"5\"/> <path d=\"M172 296 L168 372 L232 372 L228 296 Z\" fill=\"#F2C6A8\" stroke-width=\"5\"/> <path d=\"M172 300 L229 300 L229 334 Q200 350 171 334 Z\" fill=\"#D9A285\" stroke=\"none\"/> <path d=\"M92 480 L100 404 C122 392 140 380 150 366 L172 366 L200 410 L228 366 L250 366 C260 380 278 392 300 404 L308 480 Z\" fill=\"#2F6FE4\" stroke-width=\"5\"/> <path d=\"M160 370 L200 422 L240 370\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"7\"/> <path d=\"M104 402 C124 391 141 379 152 368 M296 402 C276 391 259 379 248 368\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"6\"/> <text x=\"200\" y=\"476\" text-anchor=\"middle\" font-family=\"Bungee, 'Arial Black', sans-serif\" font-size=\"56\" fill=\"#FFFFFF\" stroke=\"#1A1424\" stroke-width=\"5\" paint-order=\"stroke\">11</text> <ellipse cx=\"116\" cy=\"205\" rx=\"21\" ry=\"29\" fill=\"#F2C6A8\" stroke-width=\"5\"/> <path d=\"M113 189 Q99 205 113 223\" fill=\"none\" stroke-width=\"3.5\"/> <ellipse cx=\"284\" cy=\"205\" rx=\"21\" ry=\"29\" fill=\"#F2C6A8\" stroke-width=\"5\"/> <path d=\"M287 189 Q301 205 287 223\" fill=\"none\" stroke-width=\"3.5\"/> <path d=\"M122 170 C120 245 150 300 200 322 C250 300 280 245 278 170 C278 100 245 66 200 66 C155 66 122 100 122 170 Z\" fill=\"#F2C6A8\" stroke=\"none\"/> <path d=\"M122 170 C120 245 150 300 200 322 C172 300 152 252 154 196 Z\" fill=\"#D9A285\" stroke=\"none\" opacity=\"0.75\"/> <path d=\"M128 160 L142 124 L150 152 L166 122 L176 156 L192 124 L206 160 L220 124 L236 158 L244 122 L258 152 L272 176 L126 178 Z\" fill=\"#D9A285\" stroke=\"none\"/> <path d=\"M122 170 C120 245 150 300 200 322 C250 300 280 245 278 170 C278 100 245 66 200 66 C155 66 122 100 122 170 Z\" fill=\"none\" stroke-width=\"5\"/> <path d=\"M124 190 L98 152 L120 140 L84 100 L128 100 L108 50 L155 78 L160 18 L192 62 L215 10 L234 62 L270 24 L264 84 L312 64 L284 112 L322 118 L286 148 L302 182 L276 172 L258 152 L244 122 L236 158 L220 124 L206 160 L192 124 L176 156 L166 122 L150 152 L142 124 L128 160 Z\" fill=\"#E3B85A\" stroke-width=\"5\" stroke-linejoin=\"miter\" stroke-miterlimit=\"10\"/> <path d=\"M160 18 L168 74 L178 70 Z M215 10 L214 66 L224 66 Z M108 50 L140 96 L148 88 Z M270 24 L248 76 L258 80 Z M84 100 L124 118 L126 108 Z M312 64 L270 104 L278 110 Z\" fill=\"#B98A35\" stroke=\"none\"/> <path d=\"M146 96 Q200 74 256 96\" fill=\"none\" stroke=\"#FFF1C9\" stroke-width=\"7\" opacity=\"0.85\"/> <path d=\"M140 178 L184 170 M216 170 L260 178\" fill=\"none\" stroke-width=\"9\"/> <ellipse cx=\"164\" cy=\"208\" rx=\"22\" ry=\"25\" fill=\"#FFFFFF\" stroke-width=\"4\"/> <circle cx=\"168\" cy=\"211\" r=\"12\" fill=\"#6E8A9A\" stroke=\"none\"/> <circle cx=\"168\" cy=\"211\" r=\"6\" fill=\"#1A1424\" stroke=\"none\"/> <circle cx=\"173\" cy=\"205\" r=\"3.6\" fill=\"#FFFFFF\" stroke=\"none\"/> <path d=\"M140 202 Q164 178 188 199 M140 202 L129 194\" fill=\"none\" stroke-width=\"8\"/> <ellipse cx=\"236\" cy=\"208\" rx=\"22\" ry=\"25\" fill=\"#FFFFFF\" stroke-width=\"4\"/> <circle cx=\"240\" cy=\"211\" r=\"12\" fill=\"#6E8A9A\" stroke=\"none\"/> <circle cx=\"240\" cy=\"211\" r=\"6\" fill=\"#1A1424\" stroke=\"none\"/> <circle cx=\"245\" cy=\"205\" r=\"3.6\" fill=\"#FFFFFF\" stroke=\"none\"/> <path d=\"M212 199 Q236 178 260 202 M260 202 L271 194\" fill=\"none\" stroke-width=\"8\"/> <path d=\"M200 226 L192 248 L205 250\" fill=\"none\" stroke-width=\"4\"/> <path d=\"M138 242 l-7 11 M149 242 l-7 11 M160 242 l-7 11 M240 242 l7 11 M251 242 l7 11 M262 242 l7 11\" fill=\"none\" stroke=\"#C84646\" stroke-width=\"3.5\"/> <path d=\"M130 256 Q200 270 270 256 Q262 314 200 318 Q138 314 130 256 Z\" fill=\"#FFFFFF\" stroke-width=\"5\"/> <path d=\"M136 282 Q200 296 264 282\" fill=\"none\" stroke-width=\"3\"/> <path d=\"M152 262 L152 306 M168 265 L168 312 M184 266 L184 315 M216 266 L216 315 M232 265 L232 312 M248 262 L248 306\" fill=\"none\" stroke-width=\"2.5\"/> <rect x=\"195\" y=\"266\" width=\"10\" height=\"22\" fill=\"#1A1424\" stroke=\"none\"/> <path d=\"M124 250 l9 9 M276 250 l-9 9\" fill=\"none\" stroke-width=\"4\"/> </g> </svg>";
 const MANGA_SVG_K="<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"400\" height=\"480\" viewBox=\"0 0 400 480\"> <defs><clipPath id=\"clipB\"><rect width=\"400\" height=\"480\" rx=\"20\"/></clipPath></defs> <g clip-path=\"url(#clipB)\" stroke=\"#1A1424\" stroke-linejoin=\"round\" stroke-linecap=\"round\"> <rect width=\"400\" height=\"480\" fill=\"#FFC93C\" stroke=\"none\"/> <path d=\"M200 190 L900.0 190.0 L894.2 279.7 Z M200 190 L871.6 387.2 L840.8 471.7 Z M200 190 L788.9 568.4 L735.5 640.8 Z M200 190 L658.4 719.0 L586.8 773.4 Z M200 190 L490.8 826.7 L406.8 858.8 Z M200 190 L299.6 882.9 L210.0 889.9 Z M200 190 L100.4 882.9 L12.4 864.4 Z M200 190 L-90.8 826.7 L-170.0 784.2 Z M200 190 L-258.4 719.0 L-322.4 655.9 Z M200 190 L-388.9 568.4 L-432.5 489.9 Z M200 190 L-471.6 387.2 L-491.4 299.5 Z M200 190 L-500.0 190.0 L-494.2 100.3 Z M200 190 L-471.6 -7.2 L-440.8 -91.7 Z M200 190 L-388.9 -188.4 L-335.5 -260.8 Z M200 190 L-258.4 -339.0 L-186.8 -393.4 Z M200 190 L-90.8 -446.7 L-6.8 -478.8 Z M200 190 L100.4 -502.9 L190.0 -509.9 Z M200 190 L299.6 -502.9 L387.6 -484.4 Z M200 190 L490.8 -446.7 L570.0 -404.2 Z M200 190 L658.4 -339.0 L722.4 -275.9 Z M200 190 L788.9 -188.4 L832.5 -109.9 Z M200 190 L871.6 -7.2 L891.4 80.5 Z \" fill=\"#FFDB7A\" stroke=\"none\"/> <path d=\"M30 480 C40 410 90 380 160 366 L240 366 C310 380 360 410 370 480 Z\" fill=\"#F0C3A7\" stroke-width=\"5\"/> <path d=\"M174 300 L168 372 L232 372 L226 300 Z\" fill=\"#F0C3A7\" stroke-width=\"5\"/> <path d=\"M174 304 L227 304 L228 338 Q200 354 172 338 Z\" fill=\"#D4A086\" stroke=\"none\"/> <path d=\"M92 480 L100 404 C122 392 140 380 150 366 L172 366 L200 410 L228 366 L250 366 C260 380 278 392 300 404 L308 480 Z\" fill=\"#FFC93C\" stroke-width=\"5\"/> <path d=\"M160 370 L200 422 L240 370\" fill=\"none\" stroke=\"#1B2340\" stroke-width=\"7\"/> <path d=\"M104 402 C124 391 141 379 152 368 M296 402 C276 391 259 379 248 368\" fill=\"none\" stroke=\"#1B2340\" stroke-width=\"6\"/> <text x=\"200\" y=\"476\" text-anchor=\"middle\" font-family=\"Bungee, 'Arial Black', sans-serif\" font-size=\"56\" fill=\"#1B2340\" stroke=\"#FFFFFF\" stroke-width=\"5\" paint-order=\"stroke\">3</text> <ellipse cx=\"118\" cy=\"208\" rx=\"17\" ry=\"25\" fill=\"#F0C3A7\" stroke-width=\"5\"/> <path d=\"M115 194 Q104 208 115 223\" fill=\"none\" stroke-width=\"3.5\"/> <ellipse cx=\"282\" cy=\"208\" rx=\"17\" ry=\"25\" fill=\"#F0C3A7\" stroke-width=\"5\"/> <path d=\"M285 194 Q296 208 285 223\" fill=\"none\" stroke-width=\"3.5\"/> <path d=\"M124 168 C122 250 152 306 200 328 C248 306 278 250 276 168 C276 100 244 70 200 70 C156 70 124 100 124 168 Z\" fill=\"#F0C3A7\" stroke=\"none\"/> <path d=\"M124 168 C122 250 152 306 200 328 C172 306 154 256 156 196 Z\" fill=\"#D4A086\" stroke=\"none\" opacity=\"0.75\"/> <path d=\"M124 168 C122 250 152 306 200 328 C248 306 278 250 276 168 C276 100 244 70 200 70 C156 70 124 100 124 168 Z\" fill=\"none\" stroke-width=\"5\"/> <path d=\"M126 190 L118 140 L126 92 L150 48 L190 22 L242 8 L300 16 L334 42 L326 78 L304 64 L308 98 L284 106 L286 142 L276 180 L268 136 L234 120 L200 117 L166 121 L140 134 L132 162 Z\" fill=\"#6B4A32\" stroke-width=\"5\" stroke-linejoin=\"miter\" stroke-miterlimit=\"10\"/> <path d=\"M126 190 L118 140 L134 146 L136 184 Z M276 180 L286 142 L272 140 Z\" fill=\"#8C6A4E\" stroke=\"none\"/> <path d=\"M318 34 Q232 26 150 60 M318 72 Q230 56 138 98 M290 100 Q222 92 148 124\" fill=\"none\" stroke=\"#3E2A1C\" stroke-width=\"4\"/> <path d=\"M286 24 Q226 26 176 44\" fill=\"none\" stroke=\"#A07A58\" stroke-width=\"7\"/> <path d=\"M140 176 L186 170 M214 164 L260 170\" fill=\"none\" stroke=\"#3A2416\" stroke-width=\"10\"/> <ellipse cx=\"164\" cy=\"208\" rx=\"21\" ry=\"22\" fill=\"#FFFFFF\" stroke-width=\"4\"/> <circle cx=\"169\" cy=\"211\" r=\"11.5\" fill=\"#5A3A22\" stroke=\"none\"/> <circle cx=\"169\" cy=\"211\" r=\"6\" fill=\"#1A1424\" stroke=\"none\"/> <circle cx=\"174\" cy=\"205\" r=\"3.4\" fill=\"#FFFFFF\" stroke=\"none\"/> <path d=\"M141 203 Q164 182 186 200 M141 203 L130 196\" fill=\"none\" stroke-width=\"8\"/> <ellipse cx=\"236\" cy=\"206\" rx=\"21\" ry=\"23\" fill=\"#FFFFFF\" stroke-width=\"4\"/> <circle cx=\"241\" cy=\"209\" r=\"11.5\" fill=\"#5A3A22\" stroke=\"none\"/> <circle cx=\"241\" cy=\"209\" r=\"6\" fill=\"#1A1424\" stroke=\"none\"/> <circle cx=\"246\" cy=\"203\" r=\"3.4\" fill=\"#FFFFFF\" stroke=\"none\"/> <path d=\"M214 198 Q236 178 259 200 M259 200 L270 192\" fill=\"none\" stroke-width=\"8\"/> <path d=\"M200 228 L193 252 L206 254\" fill=\"none\" stroke-width=\"4\"/> <path d=\"M140 246 l-7 11 M151 246 l-7 11 M162 246 l-7 11 M238 244 l7 11 M249 244 l7 11 M260 244 l7 11\" fill=\"none\" stroke=\"#C84646\" stroke-width=\"3.5\"/> <path d=\"M136 262 Q204 276 272 250 Q258 314 198 318 Q146 314 136 262 Z\" fill=\"#FFFFFF\" stroke-width=\"5\"/> <path d=\"M141 286 Q204 298 266 276\" fill=\"none\" stroke-width=\"3\"/> <path d=\"M156 268 L156 308 M172 271 L172 314 M188 272 L188 317 M204 272 L204 317 M220 269 L220 315 M236 265 L236 311 M252 259 L252 302\" fill=\"none\" stroke-width=\"2.5\"/> <path d=\"M130 256 l9 9 M278 244 l-8 10\" fill=\"none\" stroke-width=\"4\"/> </g> </svg>";
@@ -202,6 +203,95 @@ function takeBall(e){
   else {say("Your ball!","Go score on the right hoop",C.info);}
 }
 
+// ---------- dunk effects: thunder, breaking glass, and a cracked screen for a windmill ----------
+const WIND_MAKE=0.4;   // a windmill is harder to finish than a normal dunk (0.5)
+let boardFx={t:0,T:1,side:"R",shatter:false,shards:[],bolts:[],flash:0,boltT:0};
+let crackFx={t:0,T:2.8,lines:[],rings:[],cx:0,cy:0};
+function jagged(x0,y0,x1,y1,n,amp){
+  const pts=[[x0,y0]];
+  for(let i=1;i<n;i++){const u=i/n; pts.push([x0+(x1-x0)*u+(Math.random()-0.5)*amp, y0+(y1-y0)*u+(Math.random()-0.5)*amp*0.4]);}
+  pts.push([x1,y1]); return pts;
+}
+function makeBolts(side){const bx=side==="R"?780:63; return [0,1].map(k=>jagged(bx+(Math.random()-0.5)*170,0,bx,148+k*34,9,46));}
+// a made dunk: lightning hits the backboard and glass flies; a windmill shatters the whole board
+function startBoardFx(side,wind){
+  const bx=side==="R"?780:63, inward=side==="R"?-1:1, n=wind?48:16, shards=[];
+  for(let i=0;i<n;i++) shards.push({x:bx+(Math.random()-0.5)*6, y:142+Math.random()*58,
+    vx:inward*(40+Math.random()*(wind?280:150))+(Math.random()-0.5)*60, vy:-60-Math.random()*(wind?230:120),
+    rot:Math.random()*6.28, vr:(Math.random()-0.5)*14, s:2+Math.random()*(wind?6:3.5)});
+  const T=wind?2.6:1.6;
+  boardFx={t:T,T,side,shatter:wind,shards,bolts:makeBolts(side),flash:0.32,boltT:wind?0.7:0.5};
+  shakeT=Math.max(shakeT,wind?0.6:0.4);
+}
+// the phone screen "cracks" from a point near the middle, spreading out in jagged lines with rings between them
+function startCrackFx(){
+  const cx=W/2+(Math.random()-0.5)*80, cy=150+(Math.random()-0.5)*30, n=14, lines=[], rings=[];
+  for(let i=0;i<n;i++){const a=i/n*Math.PI*2+(Math.random()-0.5)*0.35, len=360+Math.random()*320;
+    lines.push(jagged(cx,cy,cx+Math.cos(a)*len,cy+Math.sin(a)*len,10,22));}
+  for(const r of [28,70,130]){const ring=[];
+    for(let i=0;i<n;i++){const a=i/n*Math.PI*2+(Math.random()-0.5)*0.2, rr2=r*(0.8+Math.random()*0.4); ring.push([cx+Math.cos(a)*rr2,cy+Math.sin(a)*rr2]);}
+    rings.push(ring);}
+  crackFx={t:2.8,T:2.8,lines,rings,cx,cy};
+}
+function updateFx(dt){
+  if(boardFx.t>0){
+    boardFx.t-=dt; if(boardFx.flash>0) boardFx.flash-=dt;
+    if(boardFx.boltT>0){boardFx.boltT-=dt; if(Math.random()<0.35) boardFx.bolts=makeBolts(boardFx.side);}   // the bolt flickers
+    for(const s of boardFx.shards){
+      s.vy+=GB*dt; s.x+=s.vx*dt; s.y+=s.vy*dt; s.rot+=s.vr*dt;
+      if(s.y>FLOOR-2){s.y=FLOOR-2; s.vy*=-0.25; s.vx*=0.6; s.vr*=0.5;}
+    }
+  }
+  if(crackFx.t>0) crackFx.t-=dt;
+}
+function boardGone(side){return boardFx.t>0.5 && boardFx.shatter && boardFx.side===side;}
+function drawBoardFx(){
+  if(boardFx.t<=0) return;
+  if(boardFx.boltT>0){
+    for(const b of boardFx.bolts) for(const [w,col] of [[10,"rgba(140,180,255,0.35)"],[3.5,"rgba(220,235,255,0.95)"],[1.5,"#FFFFFF"]]){
+      ctx.strokeStyle=col; ctx.lineWidth=w; ctx.lineJoin="round"; ctx.lineCap="round";
+      ctx.beginPath(); b.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.stroke();
+    }
+    const bx=boardFx.side==="R"?780:63, g=ctx.createRadialGradient(bx,170,2,bx,170,80);
+    g.addColorStop(0,"rgba(255,255,255,0.85)"); g.addColorStop(1,"rgba(160,200,255,0)");
+    ctx.fillStyle=g; ctx.fillRect(bx-80,90,160,160);
+  }
+  ctx.globalAlpha=Math.min(1,boardFx.t/0.5);
+  for(const s of boardFx.shards){
+    ctx.save(); ctx.translate(s.x,s.y); ctx.rotate(s.rot);
+    ctx.fillStyle="rgba(205,235,255,0.85)"; ctx.beginPath(); ctx.moveTo(-s.s,-s.s*0.6); ctx.lineTo(s.s,-s.s*0.2); ctx.lineTo(-s.s*0.2,s.s); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle="rgba(255,255,255,0.9)"; ctx.lineWidth=0.8; ctx.stroke(); ctx.restore();
+  }
+  ctx.globalAlpha=1;
+}
+function drawScreenFx(){
+  if(boardFx.t>0 && boardFx.flash>0){ctx.fillStyle="rgba(255,255,255,"+(Math.min(1,boardFx.flash/0.32)*0.7).toFixed(3)+")"; ctx.fillRect(0,0,W,H);}
+  if(crackFx.t<=0) return;
+  const grow=Math.min(1,(crackFx.T-crackFx.t)/0.12);
+  ctx.save(); ctx.globalAlpha=Math.min(1,crackFx.t/0.6); ctx.lineJoin="round"; ctx.lineCap="round";
+  for(const [w,col] of [[3,"rgba(0,0,0,0.35)"],[1.4,"rgba(255,255,255,0.92)"]]){
+    ctx.strokeStyle=col; ctx.lineWidth=w;
+    for(const l of crackFx.lines){const n=Math.max(2,Math.ceil(l.length*grow)); ctx.beginPath(); for(let i=0;i<n;i++){const [x,y]=l[i]; i?ctx.lineTo(x,y):ctx.moveTo(x,y);} ctx.stroke();}
+    if(grow>=1) for(const r of crackFx.rings){ctx.beginPath(); r.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.closePath(); ctx.stroke();}
+  }
+  const g=ctx.createRadialGradient(crackFx.cx,crackFx.cy,0,crackFx.cx,crackFx.cy,40);
+  g.addColorStop(0,"rgba(255,255,255,0.7)"); g.addColorStop(1,"rgba(255,255,255,0)");
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(crackFx.cx,crackFx.cy,40,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+// where the hand (and ball) is during a windmill: from overhead, 180 degrees round behind the back to down low,
+// then forward and up over the top into the rim
+function windmillHand(dk,e,dir,rim){
+  const sx=e.x+dir*6, sy=e.y-47, L=34;
+  if(dk.t<RISE){
+    const u=Math.min(1,Math.max(0,(dk.t-dk.w0)/Math.max(0.08,RISE-dk.w0))), th=-Math.PI/2-Math.PI*u;
+    return {x:sx+dir*Math.cos(th)*L, y:sy+Math.sin(th)*L};
+  }
+  const u=Math.min(1,(dk.t-RISE)/SLAM), th=Math.PI/2-Math.PI*0.9*u, k=u*u;
+  const arm={x:sx+dir*Math.cos(th)*L, y:sy+Math.sin(th)*L};
+  return {x:arm.x+(rim.x-arm.x)*k, y:arm.y+(rim.y-6-arm.y)*k};
+}
+
 // ---------- stealing ----------
 function trySteal(joy,joyY){
   if(stealCool>0) return;
@@ -240,7 +330,7 @@ function release(auto){
   const tx=targetFor(pw,range,auto), sp=shotPath(h.x,h.y,tx,RR.y);
   const missType=auto?"auto":(pw<range[0]?(pw<range[0]-25?"air":"short"):"long");
   Object.assign(ball,{state:"flight",x0:h.x,y0:h.y,x:h.x,y:h.y,vx:sp.vx,vy:sp.vy,T:sp.T,t:0,make,pts:z.pts,timer:0,
-    shooter:p,missType,dunk:false,lucky:false,live:false,saveTried:false,fade:charge.fade,far:z===ZONES.far});
+    shooter:p,missType,dunk:false,wind:false,lucky:false,live:false,saveTried:false,fade:charge.fade,far:z===ZONES.far});
   owner=null; stats.att++;
   charge.lastPower=pw; charge.shown=1.2; charge.range=range; charge.zone=z;
   lastShot = auto ? "Held too long: the ball flew off at 100"
@@ -255,7 +345,7 @@ function cpuRelease(){
   const sp=shotPath(h.x,h.y,tx,RL.y);
   const over=(tx-RL.x)*RL.dir>0;
   Object.assign(ball,{state:"flight",x0:h.x,y0:h.y,x:h.x,y:h.y,vx:sp.vx,vy:sp.vy,T:sp.T,t:0,make,pts:z.pts,timer:0,
-    shooter:d,missType:over?"long":"short",dunk:false,lucky:false,live:false,fade:cpu.fade,far:z===ZONES.far});
+    shooter:d,missType:over?"long":"short",dunk:false,wind:false,lucky:false,live:false,fade:cpu.fade,far:z===ZONES.far});
   owner=null; cpu.charging=false;
   lastShot=NAME.d+" shot from "+z.name.toLowerCase()+(cpu.fade?" with a fade-away":"");
 }
@@ -327,6 +417,9 @@ function update(dt){
 
   // player
   if(!shootDown) needRelease=false;
+  if(dunk.on && !dunk.wind && !dunk.resolved && dunk.t<RISE*0.8 && joyY<-0.5){
+    dunk.wind=true; dunk.w0=dunk.t; dunk.success=Math.random()<WIND_MAKE; lastShot="WINDMILL! · 40% chance";
+  }
   if(dunk.on) updateDunk(dt);
   else {
     p.x=clamp(p.x+joy*(charge.on?70:170)*dt,24,812);
@@ -362,7 +455,9 @@ function update(dt){
   // ball
   if(ball.state==="held"){
     let h;
-    if(owner===p && dunk.on){
+    if(owner===p && dunk.on && dunk.wind) h=windmillHand(dunk,p,1,RR);
+    else if(owner===d && cdunk.on && cdunk.wind) h=windmillHand(cdunk,d,-1,RL);
+    else if(owner===p && dunk.on){
       const a={x:p.x+10,y:p.y-96};
       if(dunk.t<RISE) h=a;
       else {const u=Math.min(1,(dunk.t-RISE)/SLAM); h={x:a.x+(RR.x-a.x)*u, y:a.y+(RR.y-6-a.y)*u};}
@@ -430,7 +525,7 @@ function update(dt){
     ball.vy+=GB*dt; ball.y+=ball.vy*dt;
     if(ball.y>FLOOR-8){ball.y=FLOOR-8; ball.vy*=-0.55; if(Math.abs(ball.vy)<40) ball.vy=0;}
   }
-  updateNets(dt);
+  updateNets(dt); updateFx(dt);
   if(msg.t>0) msg.t-=dt;
   if(celebrate.t>0) celebrate.t-=dt;
   if(dblFx.t>0) dblFx.t-=dt;
@@ -448,12 +543,13 @@ function trackRun(dt){
 }
 
 function startDunk(){
-  Object.assign(dunk,{on:true,t:0,x0:p.x,success:Math.random()<0.5,resolved:false,hang:0});
+  Object.assign(dunk,{on:true,t:0,x0:p.x,success:Math.random()<0.5,resolved:false,hang:0,wind:false,w0:0});
   p.ground=false; p.vy=0; needRelease=true; stats.att++; d.jumped=false;
   lastShot="Dunk attempt · 50% chance";
 }
 function startCpuDunk(){
-  Object.assign(cdunk,{on:true,t:0,x0:d.x,success:Math.random()<SKILL.dunkMake,resolved:false,hang:0});
+  const wind=Math.random()<SKILL.windTry;   // the computer sometimes goes for a windmill too
+  Object.assign(cdunk,{on:true,t:0,x0:d.x,success:Math.random()<(wind?WIND_MAKE:SKILL.dunkMake),resolved:false,hang:0,wind,w0:0.06});
   d.ground=false; d.vy=0;
   lastShot=NAME.d+" is going for the dunk!";
 }
@@ -493,8 +589,8 @@ function resolveDunk(dk,e,dir,rim,dunkX){
     return;
   }
   dk.hang=dk.success?0.32:0.02; shakeT=dk.success?0.3:0.12;
-  Object.assign(ball,{shooter:e,make:dk.success,pts:2,far:false,fade:false,dunk:true});
-  if(dk.success){ arrive(0); }
+  Object.assign(ball,{shooter:e,make:dk.success,pts:2,far:false,fade:false,dunk:true,wind:!!dk.wind});
+  if(dk.success){ startBoardFx(byP?"R":"L",dk.wind); if(dk.wind) startCrackFx(); arrive(0); }
   else {
     owner=null; if(byP) stats.streak=0;
     Object.assign(ball,{state:"free",x:rim.front-dir*4,y:rim.y-8,vx:-dir*(150+Math.random()*90),vy:-280,timer:0,live:false});
@@ -530,13 +626,13 @@ function arrive(t){
     netKick(byP?1:0, ball.dunk?9:3, ball.dunk?(byP?2:-2):0); // swish, or a hard yank on a dunk
     if(byP){
       stats.score+=ball.pts; stats.made++; if(ball.pts===3) stats.threes++; if(ball.dunk) stats.dunks++; stats.streak++; stats.best=Math.max(stats.best,stats.streak);
-      const cat=ball.lucky?"lucky":(ball.dunk?"dunk":(ball.far?"half":(ball.fade?"fade":(stats.streak>=3?"fire":(ball.pts===3?"three":"two")))));
+      const cat=ball.lucky?"lucky":ball.wind?"windmill":(ball.dunk?"dunk":(ball.far?"half":(ball.fade?"fade":(stats.streak>=3?"fire":(ball.pts===3?"three":"two")))));
       say(pick(cat), "+"+ball.pts+(stats.streak>1?" · "+stats.streak+" in a row":""), C.green);
       setMood(p,"happy"); setMood(d,"grump");
       if(BIG_PLAYS.includes(cat)) celebrateFor(p);
     } else {
       stats.cpu+=ball.pts;
-      const cat=ball.lucky?"lucky":(ball.dunk?"dunk":(ball.far?"half":(ball.fade?"fade":(ball.pts===3?"three":"two"))));
+      const cat=ball.lucky?"lucky":ball.wind?"windmill":(ball.dunk?"dunk":(ball.far?"half":(ball.fade?"fade":(ball.pts===3?"three":"two"))));
       say(pick(cat),NAME.d+" +"+ball.pts,C.warn);
       setMood(d,"happy"); setMood(p,"grump");
       if(BIG_PLAYS.includes(cat)) celebrateFor(d);
@@ -694,7 +790,8 @@ function drawHoop(side){
   const L=side==="L";
   const poleX=L?32:804, armX=L?38:782, boardX=L?60:777, rimX=L?67:737;
   ctx.fillStyle=C.steel; ctx.fillRect(poleX,168,8,142); ctx.fillRect(armX,168,24,6);
-  ctx.fillStyle=C.chalk; rr(boardX,140,7,62,2); ctx.fill();
+  if(!boardGone(side)){ctx.fillStyle=C.chalk; rr(boardX,140,7,62,2); ctx.fill();}
+  else {ctx.fillStyle="rgba(205,235,255,0.8)"; ctx.fillRect(boardX,140,7,6); ctx.fillRect(boardX,196,7,6);}   // only jagged edges left
   ctx.fillStyle=C.ball; rr(rimX,184,40,5,3); ctx.fill();
   // net hooks under the rim
   ctx.fillStyle=C.chalk; for(let i=0;i<=NET_COLS;i++) ctx.fillRect(rimX+20+(i/NET_COLS-0.5)*40-1,188,2,3);
@@ -911,7 +1008,8 @@ function loadSave(){
   try{
     const s=JSON.parse(localStorage.getItem(SAVE_KEY)||"null");
     if(!s) return;
-    for(const b of ["zackie","keelan"]) if(s.kits&&s.kits[b]&&MAINS[s.kits[b].main]&&TRIMS[s.kits[b].trim]) kits[b]=s.kits[b];
+    for(const b of ["zackie","keelan"]) if(s.kits&&s.kits[b]&&MAINS[s.kits[b].main]&&TRIMS[s.kits[b].trim]){
+      kits[b]=s.kits[b]; if(!(kits[b].ball>=0 && kits[b].ball<=ARENAS.length)) kits[b].ball=0;}
     if(BOYS[s.human]) human=s.human;
     if(s.wins) wins=Object.assign({zackie:0,keelan:0},s.wins);
     if(s.progress) progress=Object.assign({zackie:0,keelan:0},s.progress);
@@ -924,7 +1022,7 @@ let screen="title", mode="vs", overWinner="p", ui=[];
 function startGame(){
   applyLooks();
   Object.assign(stats,{score:0,cpu:0,made:0,att:0,streak:0,best:0,threes:0,dunks:0,blk:0,stl:0});
-  stealCool=0; stealSwipe=0; stealMsg.t=0; prevAction=true;
+  stealCool=0; stealSwipe=0; stealMsg.t=0; prevAction=true; boardFx.t=0; crackFx.t=0;
   if(mode==="level"){SKILL=levelSkill(level); WIN=levelTarget(level);}
   else {SKILL=Object.assign({},SKILL_BASE); WIN=21;}
   cpuOn = mode!=="practice";
@@ -1030,7 +1128,7 @@ function levelSkill(n){
   const t=n/(LEVELS-1), L=(a,b)=>a+(b-a)*t;   // level 1 = easiest, last level = hardest
   return {acc:L(0.6,1.25), noReact:L(0.5,0.06), timingNoise:L(0.6,0.16), defSpeed:L(115,195), chaseSpeed:L(135,210),
     atkSpeed:L(100,165), fadeChance:L(0.25,0.85), dunkTry:L(0.08,0.45), dunkMake:L(0.38,0.62), blockDunk:L(0.08,0.42),
-    dblChance:L(0.05,0.5), stealChance:L(0.6,0.3), saveChance:L(0.08,0.45)};
+    dblChance:L(0.05,0.5), stealChance:L(0.6,0.3), saveChance:L(0.08,0.45), windTry:L(0.1,0.4)};
 }
 let pickByPlayer=false;   // true when the level comes from the 1 v 1 button, so either boy can pick up his own next level
 function openLevel(n,byPlayer){level=n; mode="level"; screen="setup"; pickByPlayer=!!byPlayer;}
@@ -1219,7 +1317,14 @@ function playerCard(boy,x,y,w,h){
   text("TRIM",tx,y+120,BODY(12,900),C.muted);
   Object.keys(TRIMS).forEach((t,i)=>{const same=TRIMS[t]===MAINS[k.main];
     swatch(tx+13+i*27,y+144,10,TRIMS[t],k.trim===t,same,()=>{k.trim=t; refreshManga(boy);});});
-  text(niceKit(k),tx,y+180,BODY(14,900),C.ink);
+  const bl=ballList(), bi=k.ball||0;
+  text("BALL",tx,y+176,BODY(12,900),C.muted);
+  const by=y+202, cyc=step=>()=>{k.ball=(bi+step+bl.length)%bl.length;};
+  button(tx,by-15,30,30,"‹",{size:20},cyc(-1));
+  drawBallAt(tx+52,by,14,bl[bi],performance.now()/900);
+  let nm=bl[bi].name, fs=13; ctx.font=BODY(fs,900); while(fs>9 && ctx.measureText(nm).width>x+w-tx-118){fs--; ctx.font=BODY(fs,900);}
+  text(nm,tx+74,by-5,BODY(fs,900),C.ink); text((bi+1)+" of "+bl.length,tx+74,by+10,BODY(10,800),C.muted);
+  button(x+w-46,by-15,30,30,"›",{size:20},cyc(1));
   const hint=sel?"Ready to play":((mode==="level"&&!pickByPlayer)?"Plays as the computer":"Tap the card to "+(mode==="practice"?"pick ":"play as ")+b.name);
   text(hint,tx,y+h-22,BODY(12,800),sel?C.warn:C.muted);
 }
@@ -1417,6 +1522,7 @@ function drawPlayer(){
   shadow(p);
   let hx=12, hy=-26, ox=-12, oy=-24;
   if(stealSwipe>0 && owner!==p){hx=(Math.sign(d.x-p.x)||1)*26; hy=-24;}
+  else if(dunk.on && dunk.wind && !dunk.resolved){hx=ball.x-p.x; hy=ball.y-p.y; ox=-14; oy=-64;}
   else if(dunk.on){
     if(dunk.t<RISE){hx=10;hy=-96;ox=-16;oy=-66;}
     else if(dunk.t<RISE+SLAM+dunk.hang || !dunk.resolved){hx=12;hy=-86;ox=-14;oy=-64;}
@@ -1434,7 +1540,8 @@ function drawCpu(){
   if(!cpuOn) return;
   shadow(d);
   let hx=-16, hy=-24, ox=16, oy=-24;
-  if(cdunk.on){
+  if(cdunk.on && cdunk.wind && !cdunk.resolved){hx=ball.x-d.x; hy=ball.y-d.y; ox=14; oy=-64;}
+  else if(cdunk.on){
     if(cdunk.t<RISE){hx=-10;hy=-96;ox=16;oy=-66;}
     else if(cdunk.t<RISE+SLAM+cdunk.hang || !cdunk.resolved){hx=-12;hy=-86;ox=14;oy=-64;}
     else {hx=-16;hy=-70;ox=16;oy=-60;}
@@ -1458,17 +1565,32 @@ function drawBall(){
     ctx.fillStyle="rgba(0,0,0,"+(0.32*k).toFixed(3)+")";
     ctx.beginPath(); ctx.ellipse(x,FLOOR+1,R*1.1*k+2,2.6*k,0,0,Math.PI*2); ctx.fill();
   }
+  drawBallAt(x,y,R,BALLS[kits[human].ball||0],ball.rot||0);
+}
+// the balls: the classic orange one, then one per arena in that arena's two colours
+let BALLS=null;
+function ballList(){
+  if(!BALLS) BALLS=[{name:"Classic",a:"#EE6A1C",b:null}].concat(ARENAS.map(a=>({name:a.name,a:a.p,b:a.s})));
+  return BALLS;
+}
+function drawBallAt(x,y,R,def,rot){
   ctx.save(); ctx.translate(x,y);
-  // shaded leather: light from the top left
-  const g=ctx.createRadialGradient(-3,-3.5,0.5,0,0,R);
-  g.addColorStop(0,"#FFA45C"); g.addColorStop(0.5,"#EE6A1C"); g.addColorStop(1,"#A9410C");
+  const shade=(c,k)=>[mix(c,"#FFFFFF",0.38),c,mix(c,"#000000",0.35)];
+  const ga=shade(def.a), g=ctx.createRadialGradient(-R*0.38,-R*0.44,R*0.06,0,0,R);   // light from the top left
+  g.addColorStop(0,ga[0]); g.addColorStop(0.5,ga[1]); g.addColorStop(1,ga[2]);
   ctx.fillStyle=g; ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.fill();
   ctx.save(); ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.clip();
-  ctx.rotate(ball.rot||0);
-  ctx.fillStyle="rgba(90,30,0,0.22)";
-  for(const [px,py] of PEBBLES){ctx.fillRect(px-0.35,py-0.35,0.7,0.7);}
+  ctx.rotate(rot);
+  if(def.b){   // two-tone: the second colour fills alternate panels, so it flashes as the ball spins
+    const gb=shade(def.b), g2=ctx.createRadialGradient(-R*0.38,-R*0.44,R*0.06,0,0,R);
+    g2.addColorStop(0,gb[0]); g2.addColorStop(0.5,gb[1]); g2.addColorStop(1,gb[2]); ctx.fillStyle=g2;
+    ctx.beginPath(); ctx.moveTo(0,-R); ctx.lineTo(0,0); ctx.lineTo(R,0); ctx.arc(0,0,R,0,-Math.PI/2,true); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0,R); ctx.lineTo(0,0); ctx.lineTo(-R,0); ctx.arc(0,0,R,Math.PI,Math.PI/2,true); ctx.fill();
+  }
+  ctx.fillStyle="rgba(40,15,0,0.2)";
+  for(const [px,py] of PEBBLES){const k=R/8; ctx.fillRect(px*k-0.35,py*k-0.35,0.7,0.7);}
   // the eight-panel seam pattern: a cross plus two curved side seams
-  ctx.strokeStyle="#2A1206"; ctx.lineWidth=1.05; ctx.lineCap="round";
+  ctx.strokeStyle=def.b?"rgba(15,15,25,0.9)":"#2A1206"; ctx.lineWidth=Math.max(1.05,R*0.13); ctx.lineCap="round";
   ctx.beginPath();
   ctx.moveTo(-R,0); ctx.lineTo(R,0);
   ctx.moveTo(0,-R); ctx.lineTo(0,R);
@@ -1476,9 +1598,8 @@ function drawBall(){
   ctx.moveTo(R*0.62,-R*0.82); ctx.quadraticCurveTo(R*0.18,0,R*0.62,R*0.82);
   ctx.stroke();
   ctx.restore();
-  // shine and rim
-  ctx.fillStyle="rgba(255,255,255,0.35)"; ctx.beginPath(); ctx.ellipse(-3,-3.6,2.4,1.4,-0.6,0,Math.PI*2); ctx.fill();
-  ctx.strokeStyle="#6E2A06"; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.stroke();
+  ctx.fillStyle="rgba(255,255,255,0.35)"; ctx.beginPath(); ctx.ellipse(-R*0.38,-R*0.45,R*0.3,R*0.18,-0.6,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle=mix(def.a,"#000000",0.55); ctx.lineWidth=Math.max(1,R*0.12); ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.stroke();
   ctx.restore();
 }
 // dribbling: the ball bounces between the hand and the floor beside the player
@@ -1538,7 +1659,7 @@ function drawHUD(){
     text("Run to the ball to grab it",cx,42,BODY(13,900),C.ink,"center");
   } else if(owner===p && inKey(p.x)){
     text((cpuOn?"YOUR BALL · ":"PRACTICE · ")+"DUNK ZONE",cx,26,BODY(11,900),C.muted,"center");
-    text("Tap DUNK · 50% chance to slam it in",cx,42,BODY(13,900),C.ink,"center");
+    text("Tap DUNK (50%) · push joystick UP in the air for a WINDMILL",cx,42,BODY(12,900),C.ink,"center");
   } else {
     const z=zoneFor(p.x,RR);
     text((cpuOn?"YOUR BALL · ":"PRACTICE · ")+z.name.toUpperCase(),cx,26,BODY(11,900),C.muted,"center");
@@ -1651,7 +1772,7 @@ function drawGame(){
     for(const k of [1,0.6]){ctx.beginPath(); ctx.ellipse(fx.x,fx.y,(10+u*34)*k,(3+u*9)*k,0,0,Math.PI*2); ctx.stroke();}
     ctx.globalAlpha=1;
   }
-  drawPlayer(); drawBall(); drawNetLayer(true);
+  drawPlayer(); drawBall(); drawNetLayer(true); drawBoardFx();
   if(dblFx.t>0){ctx.globalAlpha=Math.min(1,dblFx.t*4); text("DOUBLE JUMP!",p.x,p.y-112,DISP(14),C.green,"center"); ctx.globalAlpha=1;}
   if(stealMsg.t>0){ctx.globalAlpha=Math.min(1,stealMsg.t*3); text(stealMsg.text,p.x,p.y-112,BODY(13,900),C.warn,"center"); ctx.globalAlpha=1;}
   if(dblMiss>0){ctx.globalAlpha=Math.min(1,dblMiss*3); text("Too early or late!",p.x,p.y-112,BODY(13,900),C.warn,"center"); ctx.globalAlpha=1;}
@@ -1664,7 +1785,7 @@ function drawGame(){
     for(let i=0;i<3;i++){ctx.beginPath();ctx.moveTo(d.x+22+i*6,d.y-20-i*14);ctx.lineTo(d.x+40+i*6,d.y+4-i*14);ctx.stroke();}
   }
   ctx.restore();
-  drawMeter(); drawHUD(); drawControls(); drawMsg();
+  drawMeter(); drawHUD(); drawControls(); drawMsg(); drawScreenFx();
 }
 
 function draw(){
