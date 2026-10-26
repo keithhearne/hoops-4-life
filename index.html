@@ -87,6 +87,9 @@ const COMMENTS={
   auto:["Held it too long! It's in orbit!","Houston, we have a problem!","Let GO next time!","That one's going to space!"],
   block:["REJECTED!","Not in my house!","Get that outta here!","Return to sender!","DENIED!"],
   dunk:["SLAM DUNK!","BOOM! Throw it DOWN!","Posterized!","Hang on that rim!","MONSTER JAM!","Rattled the backboard!"],
+  steal:["PICKPOCKET!","STOLEN!","Hand in the cookie jar!","Too slow!","Snatched it!","MINE NOW!"],
+  stealMiss:["Missed the steal!","Just missed it!","Swipe and a miss!","He held on!"],
+  lucky:["Shooter's roll!","It rolls in!","Lucky bounce!","Friendly rim!","Kissed it in!"],
   dunkMiss:["Rim says NO!","Clanked the dunk!","Too much swagger!","Front iron, OUCH!","The rim fought back!"]
 };
 const KEY={x0:684,x1:804}, DUNK_X=745, RISE=0.4, SLAM=0.12, DROP=0.25;
@@ -122,13 +125,14 @@ const d={x:440,y:FLOOR,vy:0,ground:true,lean:0,react:null,jumped:false};
 const cpu={spot:200,charging:false,t:0,hold:1,fade:false};
 const ball={state:"held",x:0,y:0,vx:0,vy:0,x0:0,y0:0,t:0,T:1,make:false,pts:2,timer:0,shooter:null,missType:"short",fade:false,far:false};
 const charge={on:false,power:0,fade:false,zone:null,range:null,shown:0,lastPower:0,holdT:0};
-const stats={score:0,cpu:0,made:0,att:0,streak:0,best:0,threes:0,dunks:0,blk:0};
+const stats={score:0,cpu:0,made:0,att:0,streak:0,best:0,threes:0,dunks:0,blk:0,stl:0};
 let owner=p, cpuOn=true, gameOverT=0, inboundT=0, pendingInbound=null;
 const dunk={on:false,t:0,x0:0,success:false,resolved:false,hang:0};
 const cdunk={on:false,t:0,x0:0,success:false,resolved:false,hang:0};
 // How good the computer is. Raise or lower these to tune it.
 const SKILL_BASE={acc:1, noReact:0.2, timingNoise:0.35, defSpeed:160, chaseSpeed:178, atkSpeed:135, fadeChance:0.65,
   dunkTry:0.3, dunkMake:0.5, blockDunk:0.25, dblChance:0.33};
+SKILL_BASE.stealChance=0.45;
 let SKILL=Object.assign({},SKILL_BASE);   // the quick 1 v 1 game uses SKILL_BASE; each level sets its own
 const CPU_DUNK_X=W-DUNK_X;
 let shakeT=0, needRelease=false;
@@ -150,7 +154,10 @@ const MANGA_SVG_K="<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"400\" heigh
 const MIMG={zackie:new Image(), keelan:new Image()};
 const MANGA={get p(){return MIMG[human];}, get d(){return MIMG[other()];}};
 let msg={text:"",sub:"",t:0,color:C.ink}, lastShot="Hold SHOOT, let go in the green zone";
-let keyJoy=0, touchJoy=0, jumpQueued=false, shootKey=false, shootTouch=false;
+let keyJoy=0, touchJoy=0, keyJoyY=0, touchJoyY=0, jumpQueued=false, shootKey=false, shootTouch=false;
+// stealing: on defence the SHOOT button becomes STEAL
+const STEAL_REACH=48, STEAL_COOLDOWN=0.8;
+let stealCool=0, stealSwipe=0, prevAction=false, stealMsg={text:"",t:0};
 const keys=new Set();
 
 function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
@@ -159,12 +166,10 @@ function rot(lx,ly,a,ox,oy){const c=Math.cos(a),s=Math.sin(a);return {x:ox+lx*c-
 function handPos(e,dir,charging){return rot(charging?dir*4:dir*14, charging?-74:-58, e.lean, e.x, e.y);}
 function shotPath(x0,y0,tx,ty){const T=0.75+Math.abs(tx-x0)/900;return {vx:(tx-x0)/T, vy:(ty-y0-0.5*GB*T*T)/T, T};}
 function targetFor(power,range,auto){
-  const mid=(range[0]+range[1])/2;
   if(auto) return RR.x+80;
   if(power>=range[0]&&power<=range[1]) return RR.x;
-  let tx=RR.x+(power-mid)*2.4;
-  if(Math.abs(tx-RR.x)<24) tx=RR.x+(power<mid?-24:24);
-  return tx;
+  // the further off the timing, the further off the aim: just early = front of the rim, just late = back of the rim
+  return power<range[0] ? RR.x-(20+(range[0]-power)*1.5) : RR.x+Math.min(15,11.8+Math.random()*2.6+(power-range[1])*0.4);   // just late: onto the back of the rim, sometimes it rattles in
 }
 function say(text,sub,color){msg={text,sub:sub||"",t:1.9,color:color||C.ink};}
 function body(e,dt){if(!e.ground){e.vy+=G*dt;e.y+=e.vy*dt;if(e.y>=FLOOR){e.y=FLOOR;e.vy=0;e.ground=true;}}}
@@ -184,16 +189,37 @@ function cpuHand(){return {x:d.x-20,y:d.y-84};}
 function playerHand(){return {x:p.x+20,y:p.y-84};}
 
 function inbound(who){
-  ball.state="held"; charge.on=false; cpu.charging=false; d.jumped=false; d.react=null;
+  ball.state="held"; ball.live=false; charge.on=false; cpu.charging=false; d.jumped=false; d.react=null;
   p.lean=0; d.lean=0; dunk.on=false; cdunk.on=false;
   p.y=FLOOR; p.vy=0; p.ground=true; d.y=FLOOR; d.vy=0; d.ground=true;
   if(who==="p"||!cpuOn){owner=p; p.x=380; d.x=440;}
   else {owner=d; d.x=470; p.x=360; setCpuPlan();}
 }
 function takeBall(e){
-  owner=e; ball.state="held";
-  if(e===d){setCpuPlan(); d.lean=0; say(NAME.d+"'s ball!","Get between it and your hoop. JUMP to block",C.warn);}
+  owner=e; ball.state="held"; ball.live=false;
+  if(e===d){setCpuPlan(); d.lean=0; say(NAME.d+"'s ball!","Get in front of him: JUMP to block, or STEAL",C.warn);}
   else {say("Your ball!","Go score on the right hoop",C.info);}
+}
+
+// ---------- stealing ----------
+function trySteal(joy,joyY){
+  if(stealCool>0) return;
+  const toward=Math.sign(d.x-p.x)||1;
+  const diagonal = joyY>0.45 && joy*toward>0.3;   // down and towards the ball handler
+  stealSwipe=0.3; stealCool=STEAL_COOLDOWN;
+  if(!diagonal){stealMsg={text:"Pull the joystick down towards him!",t:1.2}; return;}
+  if(Math.abs(d.x-p.x)>STEAL_REACH){stealMsg={text:"Too far away!",t:1}; return;}
+  // he can only lose it while dribbling, not once the ball is up for a shot
+  const chance = (cpu.charging||!d.ground) ? 0 : SKILL.stealChance;
+  if(Math.random()<chance){
+    stats.stl++; owner=p; ball.state="held"; ball.live=false; needRelease=true;
+    cpu.charging=false; charge.on=false;
+    say(pick("steal"),"You stole it from "+NAME.d+"!",C.info);
+    setMood(p,"happy"); setMood(d,"shock"); celebrateFor(p);
+    lastShot="Steal by "+NAME.p;
+  } else {
+    stealMsg={text:pick("stealMiss"),t:1};
+  }
 }
 
 // ---------- player shooting ----------
@@ -213,7 +239,7 @@ function release(auto){
   const tx=targetFor(pw,range,auto), sp=shotPath(h.x,h.y,tx,RR.y);
   const missType=auto?"auto":(pw<range[0]?(pw<range[0]-25?"air":"short"):"long");
   Object.assign(ball,{state:"flight",x0:h.x,y0:h.y,x:h.x,y:h.y,vx:sp.vx,vy:sp.vy,T:sp.T,t:0,make,pts:z.pts,timer:0,
-    shooter:p,missType,dunk:false,fade:charge.fade,far:z===ZONES.far});
+    shooter:p,missType,dunk:false,lucky:false,live:false,fade:charge.fade,far:z===ZONES.far});
   owner=null; stats.att++;
   charge.lastPower=pw; charge.shown=1.2; charge.range=range; charge.zone=z;
   lastShot = auto ? "Held too long: the ball flew off at 100"
@@ -224,13 +250,64 @@ function release(auto){
 function cpuRelease(){
   const z=zoneFor(d.x,RL), h=handPos(d,-1,true);
   const chance=Math.min(0.95,z.cpu*SKILL.acc*(cpu.fade?0.85:1)), make=Math.random()<chance;
-  const s=Math.random()<0.5?-1:1, tx=make?RL.x:RL.x+s*(26+Math.random()*34);
+  const s=Math.random()<0.5?-1:1, tx=make?RL.x:(s>0?RL.x+20+Math.random()*16:RL.x-6-Math.random()*12);   // front of the rim, or back of the rim
   const sp=shotPath(h.x,h.y,tx,RL.y);
   const over=(tx-RL.x)*RL.dir>0;
   Object.assign(ball,{state:"flight",x0:h.x,y0:h.y,x:h.x,y:h.y,vx:sp.vx,vy:sp.vy,T:sp.T,t:0,make,pts:z.pts,timer:0,
-    shooter:d,missType:over?"long":"short",dunk:false,fade:cpu.fade,far:z===ZONES.far});
+    shooter:d,missType:over?"long":"short",dunk:false,lucky:false,live:false,fade:cpu.fade,far:z===ZONES.far});
   owner=null; cpu.charging=false;
   lastShot=NAME.d+" shot from "+z.name.toLowerCase()+(cpu.fade?" with a fade-away":"");
+}
+
+// ---------- ball physics: rims, backboards and floor ----------
+// How much speed the ball keeps when it bounces (coefficient of restitution), based on real basketball
+// measurements: a steel rim gives back about 55%, the glass backboard about 75%, a hardwood floor about 78%.
+const BOUNCE={rim:0.55, board:0.75, floor:0.78, net:0.15}, RIM_GRIP=0.88, BALL_R=8, RIM_Y=186;
+const HOOPS=[   // each hoop: the front and back edge of the rim, and the face of the backboard
+  {rim:RR, net:1, edges:[[737,RIM_Y],[775,RIM_Y]], face:777, faceDir:-1, top:140, bot:202},
+  {rim:RL, net:0, edges:[[107,RIM_Y],[69,RIM_Y]],  face:67,  faceDir:1,  top:140, bot:202}
+];
+// bounce the ball off a small round point (a rim edge or a backboard corner)
+function hitPoint(px,py,r,e){
+  const dx=ball.x-px, dy=ball.y-py, dd=Math.hypot(dx,dy), min=BALL_R+r;
+  if(dd>=min||dd<0.001) return false;
+  const nx=dx/dd, ny=dy/dd; ball.x=px+nx*min; ball.y=py+ny*min;
+  const vn=ball.vx*nx+ball.vy*ny; if(vn>=0) return false;
+  // reverse the part of the speed going into the rim (losing some), keep most of the part along it
+  const tx=ball.vx-vn*nx, ty=ball.vy-vn*ny;
+  ball.vx=-e*vn*nx+tx*RIM_GRIP; ball.vy=-e*vn*ny+ty*RIM_GRIP;
+  if(Math.hypot(ball.vx,ball.vy)<70) ball.vx+=(ball.x<px?-1:1)*45;   // a ball never balances on the rim
+  return true;
+}
+function collideHoops(){
+  let hit=null;
+  for(const h of HOOPS){
+    for(const [px,py] of h.edges) if(hitPoint(px,py,2.5,BOUNCE.rim)){hit="rim"; netKick(h.net,1.5,0);}
+    if(ball.y>h.top && ball.y<h.bot){   // the glass
+      if(h.faceDir<0 && ball.x+BALL_R>h.face && ball.x<h.face+7 && ball.vx>0){ball.x=h.face-BALL_R; ball.vx=-ball.vx*BOUNCE.board; ball.vy*=0.92; hit=hit||"board";}
+      if(h.faceDir>0 && ball.x-BALL_R<h.face && ball.x>h.face-7 && ball.vx<0){ball.x=h.face+BALL_R; ball.vx=-ball.vx*BOUNCE.board; ball.vy*=0.92; hit=hit||"board";}
+    }
+    for(const cy of [h.top,h.bot]) if(hitPoint(h.face-h.faceDir*3.5,cy,3.5,BOUNCE.board)) hit=hit||"board";
+    const fx=h.edges[0][0];   // the net hangs from the front of the rim, slanting in, and soaks up most of the speed
+    for(const [dx,dy] of [[2,10],[4,20],[6,28]]) if(hitPoint(fx-h.faceDir*dx,RIM_Y+dy,2,BOUNCE.net)){hit=hit||"net"; netKick(h.net,1,0);}
+  }
+  return hit;
+}
+function floorAndWalls(){
+  if(ball.y>FLOOR-BALL_R){
+    ball.y=FLOOR-BALL_R;
+    if(ball.vy>0){ball.vy=-ball.vy*BOUNCE.floor; ball.vx*=0.9;}
+    if(Math.abs(ball.vy)<35) ball.vy=0;
+  }
+  if(ball.x<8){ball.x=8; ball.vx=Math.abs(ball.vx)*0.6;}
+  if(ball.x>836){ball.x=836; ball.vx=-Math.abs(ball.vx)*0.6;}
+}
+// after a miss, a ball that bounces around and drops through its own hoop still counts
+function checkRollIn(prevY){
+  const h=ball.shooter===p?HOOPS[0]:HOOPS[1], a=Math.min(h.edges[0][0],h.edges[1][0]), b=Math.max(h.edges[0][0],h.edges[1][0]);
+  if(ball.vy>0 && prevY<RIM_Y && ball.y>=RIM_Y && ball.x>a+5 && ball.x<b-5){
+    ball.make=true; ball.lucky=true; ball.live=false; arrive(0);
+  }
 }
 
 // ---------- update ----------
@@ -238,8 +315,14 @@ function update(dt){
   if(screen!=="play"){updateNets(dt); return;}
   if(gameOverT>0){gameOverT-=dt; if(gameOverT<=0){endGame(); return;}}
   if(pendingInbound){inboundT-=dt; if(inboundT<=0){const w=pendingInbound;pendingInbound=null; if(gameOverT<=0) inbound(w);}}
-  const joy=clamp(touchJoy||keyJoy,-1,1);
+  const joy=clamp(touchJoy||keyJoy,-1,1), joyY=clamp(touchJoyY||keyJoyY,-1,1);
   const shootDown=shootKey||shootTouch;
+  // STEAL: on defence, close to the ball handler, joystick pulled down and towards him, then press STEAL
+  if(stealCool>0) stealCool-=dt;
+  if(stealSwipe>0) stealSwipe-=dt;
+  if(stealMsg.t>0) stealMsg.t-=dt;
+  const pressed=shootDown && !prevAction; prevAction=shootDown;
+  if(pressed && cpuOn && owner===d && ball.state==="held" && !cdunk.on) trySteal(joy,joyY);
 
   // player
   if(!shootDown) needRelease=false;
@@ -299,7 +382,12 @@ function update(dt){
   if(ball.state==="held"){
   } else if(ball.state==="flight"){
     ball.t+=dt; const t=ball.t;
-    ball.x=ball.x0+ball.vx*t; ball.y=ball.y0+ball.vy*t+0.5*GB*t*t;
+    let hit=null;
+    if(ball.make){ ball.x=ball.x0+ball.vx*t; ball.y=ball.y0+ball.vy*t+0.5*GB*t*t; }
+    else {   // small steps so the ball can't skip through the rim
+      const n=4, h=dt/n;
+      for(let k=0;k<n && !hit;k++){ ball.vy+=GB*h; ball.x+=ball.vx*h; ball.y+=ball.vy*h; hit=collideHoops(); }
+    }
     const early=t<ball.T*0.55;
     if(early && ball.shooter===p && cpuArmUp()){
       const hd=cpuHand();
@@ -309,19 +397,21 @@ function update(dt){
       const hd=playerHand();
       if(Math.hypot(ball.x-hd.x,ball.y-hd.y)<18){blocked(p);return;}
     }
-    if(t>=ball.T) arrive(t);
+    if(ball.make){ if(t>=ball.T) arrive(t); }
+    else if(hit || t>=ball.T+0.25 || ball.y>FLOOR-BALL_R) missNow();
   } else if(ball.state==="free"){
     ball.timer+=dt;
-    ball.vy+=GB*dt; ball.x+=ball.vx*dt; ball.y+=ball.vy*dt;
-    if(ball.vx>0 && ball.x>RR.board-8 && ball.y>140 && ball.y<202){ball.x=RR.board-8;ball.vx*=-0.5;}
-    if(ball.vx<0 && ball.x<RL.board+15 && ball.y>140 && ball.y<202){ball.x=RL.board+15;ball.vx*=-0.5;}
-    for(const fx of [RR.front,RL.front]){
-      if(Math.hypot(ball.x-fx,ball.y-RR.y)<10){const away=fx===RR.front?-1:1;ball.vx=away*(Math.abs(ball.vx)*0.5+30);ball.vy=-Math.abs(ball.vy)*0.4;netKick(fx===RR.front?1:0,2.5,away*1.5);}
+    const n=4, h=dt/n;
+    for(let k=0;k<n;k++){
+      const prevY=ball.y;
+      ball.vy+=GB*h; ball.x+=ball.vx*h; ball.y+=ball.vy*h;
+      collideHoops(); floorAndWalls();
+      if(ball.live && ball.timer<4) checkRollIn(prevY);
+      if(ball.state!=="free") break;
     }
-    if(ball.x<8){ball.x=8;ball.vx=Math.abs(ball.vx)*0.6;}
-    if(ball.x>836){ball.x=836;ball.vx=-Math.abs(ball.vx)*0.6;}
-    if(ball.y>FLOOR-8){ball.y=FLOOR-8;ball.vy*=-0.6;ball.vx*=0.85;if(Math.abs(ball.vy)<40)ball.vy=0;}
-    if(!cpuOn){ if(ball.timer>1.6) inbound("p"); }
+    if(ball.y>=FLOOR-BALL_R-0.5 && ball.vy===0) ball.vx*=Math.max(0,1-1.3*dt);   // rolling slows down on the floor
+    if(ball.state!=="free"){}   // it just rolled in: nobody can grab it
+    else if(!cpuOn){ if(ball.timer>1.6) inbound("p"); }
     else if(ball.timer>0.25){
       for(const e of [p,d]){
         if(Math.abs(ball.x-e.x)<24 && ball.y>e.y-92){takeBall(e);break;}
@@ -392,7 +482,7 @@ function resolveDunk(dk,e,dir,rim,dunkX){
     : (!p.ground && Math.abs(p.x-dunkX)<75 && Math.random()<0.5);
   if(stuffed){
     dk.hang=0.02; shakeT=0.15; owner=null; if(byP) stats.streak=0;
-    Object.assign(ball,{state:"free",x:rim.x-dir*14,y:rim.y-10,vx:-dir*(120+Math.random()*60),vy:-120,timer:0,dunk:true});
+    Object.assign(ball,{state:"free",x:rim.x-dir*14,y:rim.y-10,vx:-dir*(120+Math.random()*60),vy:-120,timer:0,dunk:true,live:false});
     say(pick("block"), byP?"Stuffed at the rim!":"You stuffed "+NAME.d+"'s dunk!", byP?C.warn:C.info);
     lastShot = byP ? "Your dunk was blocked" : "You blocked "+NAME.d+"'s dunk"; if(!byP) stats.blk++;
     setMood(e,"shock"); setMood(byP?d:p,"happy"); celebrateFor(byP?d:p);
@@ -403,7 +493,7 @@ function resolveDunk(dk,e,dir,rim,dunkX){
   if(dk.success){ arrive(0); }
   else {
     owner=null; if(byP) stats.streak=0;
-    Object.assign(ball,{state:"free",x:rim.front-dir*4,y:rim.y-8,vx:-dir*(150+Math.random()*90),vy:-280,timer:0});
+    Object.assign(ball,{state:"free",x:rim.front-dir*4,y:rim.y-8,vx:-dir*(150+Math.random()*90),vy:-280,timer:0,live:false});
     say(pick("dunkMiss"), byP?(cpuOn?"Grab the rebound!":"50/50, try again!"):NAME.d+" missed the dunk! Grab it!", byP?C.warn:C.info);
     lastShot = byP ? "Dunk missed" : NAME.d+" missed the dunk";
     setMood(e,"grump");
@@ -416,7 +506,7 @@ function setCpuPlan(){
 }
 function blocked(by){
   const shooterDir = ball.shooter===p ? 1 : -1;
-  ball.state="free"; ball.vx=shooterDir*60; ball.vy=60; ball.timer=0;
+  ball.state="free"; ball.vx=shooterDir*60; ball.vy=60; ball.timer=0; ball.live=false;
   if(by===d){
     stats.streak=0;
     say(pick("block"),"Blocked! Try a fade-away: pull back while you hold SHOOT",C.warn);
@@ -434,13 +524,13 @@ function arrive(t){
     netKick(byP?1:0, ball.dunk?9:3, ball.dunk?(byP?2:-2):0); // swish, or a hard yank on a dunk
     if(byP){
       stats.score+=ball.pts; stats.made++; if(ball.pts===3) stats.threes++; if(ball.dunk) stats.dunks++; stats.streak++; stats.best=Math.max(stats.best,stats.streak);
-      const cat=ball.dunk?"dunk":(ball.far?"half":(ball.fade?"fade":(stats.streak>=3?"fire":(ball.pts===3?"three":"two"))));
+      const cat=ball.lucky?"lucky":(ball.dunk?"dunk":(ball.far?"half":(ball.fade?"fade":(stats.streak>=3?"fire":(ball.pts===3?"three":"two")))));
       say(pick(cat), "+"+ball.pts+(stats.streak>1?" · "+stats.streak+" in a row":""), C.green);
       setMood(p,"happy"); setMood(d,"grump");
       if(BIG_PLAYS.includes(cat)) celebrateFor(p);
     } else {
       stats.cpu+=ball.pts;
-      const cat=ball.dunk?"dunk":(ball.far?"half":(ball.fade?"fade":(ball.pts===3?"three":"two")));
+      const cat=ball.lucky?"lucky":(ball.dunk?"dunk":(ball.far?"half":(ball.fade?"fade":(ball.pts===3?"three":"two"))));
       say(pick(cat),NAME.d+" +"+ball.pts,C.warn);
       setMood(d,"happy"); setMood(p,"grump");
       if(BIG_PLAYS.includes(cat)) celebrateFor(d);
@@ -453,7 +543,13 @@ function arrive(t){
     }
     pendingInbound = cpuOn ? (byP?"d":"p") : "p"; inboundT=1.1;
   } else {
-    ball.state="free"; ball.vy=ball.vy+GB*t; ball.timer=0;
+    ball.vy=ball.vy+GB*t; missNow();
+  }
+}
+function missNow(){
+  const byP=ball.shooter===p;
+  ball.state="free"; ball.timer=0; ball.live=true;
+  {
     if(byP){
       stats.streak=0;
       const tip={auto:"Let go before the bar is full",air:"Way too early, hold a bit longer",short:"A little early, hold longer",long:"A little late, let go sooner"}[ball.missType];
@@ -815,7 +911,8 @@ function saveGame(){try{localStorage.setItem(SAVE_KEY,JSON.stringify({kits,human
 let screen="title", mode="vs", overWinner="p", ui=[];
 function startGame(){
   applyLooks();
-  Object.assign(stats,{score:0,cpu:0,made:0,att:0,streak:0,best:0,threes:0,dunks:0,blk:0});
+  Object.assign(stats,{score:0,cpu:0,made:0,att:0,streak:0,best:0,threes:0,dunks:0,blk:0,stl:0});
+  stealCool=0; stealSwipe=0; stealMsg.t=0; prevAction=true;
   if(mode==="level"){SKILL=levelSkill(level); WIN=levelTarget(level);}
   else {SKILL=Object.assign({},SKILL_BASE); WIN=21;}
   cpuOn = mode!=="practice";
@@ -921,7 +1018,7 @@ function levelSkill(n){
   const t=n/(LEVELS-1), L=(a,b)=>a+(b-a)*t;   // level 1 = easiest, last level = hardest
   return {acc:L(0.6,1.25), noReact:L(0.5,0.06), timingNoise:L(0.6,0.16), defSpeed:L(115,195), chaseSpeed:L(135,210),
     atkSpeed:L(100,165), fadeChance:L(0.25,0.85), dunkTry:L(0.08,0.45), dunkMake:L(0.38,0.62), blockDunk:L(0.08,0.42),
-    dblChance:L(0.05,0.5)};
+    dblChance:L(0.05,0.5), stealChance:L(0.6,0.3)};
 }
 let pickByPlayer=false;   // true when the level comes from the 1 v 1 button, so either boy can pick up his own next level
 function openLevel(n,byPlayer){level=n; mode="level"; screen="setup"; pickByPlayer=!!byPlayer;}
@@ -1149,7 +1246,7 @@ function drawOver(){
   if(lv) text(levelName(level).toUpperCase()+(newRoad?"   ·   LEVEL "+(Math.floor(progress[human]/STOPS)+1)+" IS OPEN!":""),332,140,BODY(12,900),newRoad?C.warn:C.muted);
   else text(NAME.p.toUpperCase()+"'S GAME",332,140,BODY(12,900),C.muted);
   const rows=[["Shots made",stats.made+" / "+stats.att],["3-pointers",String(stats.threes)],["Dunks",String(stats.dunks)],
-    ["Blocks",String(stats.blk)],["Best streak",String(stats.best)],["Wins vs computer",String(wins[human]||0)]];
+    ["Blocks",String(stats.blk)],["Best streak",String(stats.best)],["Steals",String(stats.stl)]];
   rows.forEach(([l,v],i)=>{const cx=332+(i%2)*236, cy=168+Math.floor(i/2)*38;
     ctx.fillStyle="rgba(46,56,102,0.9)"; rr(cx,cy-15,224,32,10); ctx.fill();
     text(l,cx+12,cy+1,BODY(14,800),C.muted); text(v,cx+212,cy+2,DISP(16),C.ink,"right");});
@@ -1307,7 +1404,8 @@ function faceBadge(lk,cx,cy,r,bg){
 function drawPlayer(){
   shadow(p);
   let hx=12, hy=-26, ox=-12, oy=-24;
-  if(dunk.on){
+  if(stealSwipe>0 && owner!==p){hx=(Math.sign(d.x-p.x)||1)*26; hy=-24;}
+  else if(dunk.on){
     if(dunk.t<RISE){hx=10;hy=-96;ox=-16;oy=-66;}
     else if(dunk.t<RISE+SLAM+dunk.hang || !dunk.resolved){hx=12;hy=-86;ox=-14;oy=-64;}
     else {hx=16;hy=-70;ox=-16;oy=-60;}
@@ -1422,7 +1520,7 @@ function drawHUD(){
   ctx.fillStyle="rgba(46,56,102,0.95)"; rr(px,14,pw,40,12); ctx.fill();
   if(cpuOn && playerDefending()){
     text("DEFENSE · FIRST TO "+WIN,cx,26,BODY(11,900),C.warn,"center");
-    text("Stay in front, JUMP to block, tap again at the top for a double jump",cx,42,BODY(12,900),C.ink,"center");
+    text("JUMP to block · joystick down towards him + STEAL to steal",cx,42,BODY(12,900),C.ink,"center");
   } else if(cpuOn && owner!==p && ball.state==="free"){
     text("LOOSE BALL!",cx,26,BODY(11,900),C.warn,"center");
     text("Run to the ball to grab it",cx,42,BODY(13,900),C.ink,"center");
@@ -1444,8 +1542,13 @@ function drawControls(){
   ctx.strokeStyle=C.ink; ctx.lineWidth=3;
   ctx.beginPath(); ctx.moveTo(JOY.x-34,JOY.y-7); ctx.lineTo(JOY.x-41,JOY.y); ctx.lineTo(JOY.x-34,JOY.y+7);
   ctx.moveTo(JOY.x+34,JOY.y-7); ctx.lineTo(JOY.x+41,JOY.y); ctx.lineTo(JOY.x+34,JOY.y+7); ctx.stroke();
-  const jx=JOY.x+clamp(touchJoy||keyJoy,-1,1)*26;
-  ctx.fillStyle=C.chalk; ctx.beginPath(); ctx.arc(jx,JOY.y,24,0,Math.PI*2); ctx.fill();
+  const jx=JOY.x+clamp(touchJoy||keyJoy,-1,1)*26, jy=JOY.y+clamp(touchJoyY||keyJoyY,-1,1)*20;
+  if(cpuOn && owner===d){   // on defence: little arrows show the steal directions
+    ctx.strokeStyle=C.info; ctx.lineWidth=2.5;
+    for(const sx of [-1,1]){ctx.beginPath(); ctx.moveTo(JOY.x+sx*22,JOY.y+30); ctx.lineTo(JOY.x+sx*32,JOY.y+40);
+      ctx.moveTo(JOY.x+sx*32,JOY.y+32); ctx.lineTo(JOY.x+sx*32,JOY.y+40); ctx.lineTo(JOY.x+sx*24,JOY.y+40); ctx.stroke();}
+  }
+  ctx.fillStyle=C.chalk; ctx.beginPath(); ctx.arc(jx,jy,24,0,Math.PI*2); ctx.fill();
   ctx.strokeStyle=(charge.on&&charge.fade)?C.warn:C.ink; ctx.lineWidth=3; ctx.stroke();
   ctx.fillStyle=p.ground?"rgba(46,56,102,0.9)":"rgba(61,220,151,0.5)"; ctx.beginPath(); ctx.arc(JUMP.x,JUMP.y,JUMP.r,0,Math.PI*2); ctx.fill();
   ctx.strokeStyle=playerDefending()?C.warn:"rgba(255,255,255,0.5)"; ctx.lineWidth=3; ctx.stroke();
@@ -1457,6 +1560,18 @@ function drawControls(){
     text("AGAIN!",JUMP.x,JUMP.y+1,DISP(12),C.navy,"center");
   } else
   text(playerDefending()?"BLOCK":"JUMP",JUMP.x,JUMP.y+14,BODY(11,900),C.ink,"center");
+  if(cpuOn && (owner===d || (ball.state==="flight" && ball.shooter===d))){   // defence: STEAL instead of SHOOT
+    const near=Math.abs(d.x-p.x)<=STEAL_REACH && owner===d, down=shootKey||shootTouch;
+    ctx.globalAlpha=stealCool>0?0.5:1;
+    if(near){const pulse=4+Math.sin(performance.now()/120)*3;
+      ctx.strokeStyle=C.green; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(SHOOT.x,SHOOT.y,SHOOT.r+pulse,0,Math.PI*2); ctx.stroke();}
+    ctx.fillStyle="#14A3B8"; ctx.beginPath(); ctx.arc(SHOOT.x,SHOOT.y,down?39:SHOOT.r,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle=down?C.warn:C.ink; ctx.lineWidth=3; ctx.stroke();
+    text("STEAL",SHOOT.x,SHOOT.y-4,DISP(14),C.ink,"center");
+    text(near?"in reach!":"get closer",SHOOT.x,SHOOT.y+14,BODY(10,900),C.ink,"center");
+    ctx.globalAlpha=1;
+    return;
+  }
   const canShoot=owner===p && ball.state==="held" && !dunk.on;
   const dunkReady=canShoot && !charge.on && p.ground && inKey(p.x);
   const down=(shootKey||shootTouch)&&canShoot;
@@ -1526,6 +1641,7 @@ function drawGame(){
   }
   drawPlayer(); drawBall(); drawNetLayer(true);
   if(dblFx.t>0){ctx.globalAlpha=Math.min(1,dblFx.t*4); text("DOUBLE JUMP!",p.x,p.y-112,DISP(14),C.green,"center"); ctx.globalAlpha=1;}
+  if(stealMsg.t>0){ctx.globalAlpha=Math.min(1,stealMsg.t*3); text(stealMsg.text,p.x,p.y-112,BODY(13,900),C.warn,"center"); ctx.globalAlpha=1;}
   if(dblMiss>0){ctx.globalAlpha=Math.min(1,dblMiss*3); text("Too early or late!",p.x,p.y-112,BODY(13,900),C.warn,"center"); ctx.globalAlpha=1;}
   if(dunk.on && dunk.t<RISE+0.05){ // speed lines on the way up
     ctx.strokeStyle="rgba(255,255,255,0.5)"; ctx.lineWidth=2;
@@ -1570,14 +1686,14 @@ cv.addEventListener("pointerdown",e=>{
   }
   if(Math.hypot(q.x-SHOOT.x,q.y-SHOOT.y)<SHOOT.r+18){role="shoot";shootTouch=true;}
   else if(Math.hypot(q.x-JUMP.x,q.y-JUMP.y)<JUMP.r+12){role="jump";jumpQueued=true;}
-  else if(q.x<HALF && q.y>200){role="joy";touchJoy=clamp((q.x-JOY.x)/40,-1,1);}
+  else if(q.x<HALF && q.y>200){role="joy";touchJoy=clamp((q.x-JOY.x)/40,-1,1);touchJoyY=clamp((q.y-JOY.y)/40,-1,1);}
   if(role){roles.set(e.pointerId,role);try{cv.setPointerCapture(e.pointerId);}catch(_){}}
   e.preventDefault();
 });
 cv.addEventListener("pointermove",e=>{
   if(mapDrag && mapDrag.id===e.pointerId){const q=toLocal(e); if(Math.abs(q.y-mapDrag.y0)>7) mapDrag.moved=true;
     mapScroll=clamp(mapDrag.s0-(q.y-mapDrag.y0),0,mapMaxScroll()); return;}
-  if(roles.get(e.pointerId)==="joy"){const q=toLocal(e);touchJoy=clamp((q.x-JOY.x)/40,-1,1);}
+  if(roles.get(e.pointerId)==="joy"){const q=toLocal(e);touchJoy=clamp((q.x-JOY.x)/40,-1,1);touchJoyY=clamp((q.y-JOY.y)/40,-1,1);}
 });
 cv.addEventListener("wheel",e=>{
   if(screen!=="title") return;
@@ -1586,16 +1702,17 @@ cv.addEventListener("wheel",e=>{
 function endPointer(e){
   if(mapDrag && mapDrag.id===e.pointerId){ if(!mapDrag.moved && e.type==="pointerup") tapMap(toLocal(e)); mapDrag=null; }
   const role=roles.get(e.pointerId);
-  if(role==="joy") touchJoy=0;
+  if(role==="joy"){touchJoy=0; touchJoyY=0;}
   if(role==="shoot") shootTouch=false;
   roles.delete(e.pointerId);
 }
 cv.addEventListener("pointerup",endPointer); cv.addEventListener("pointercancel",endPointer);
 cv.addEventListener("contextmenu",e=>e.preventDefault());
-function keyJoyUpdate(){keyJoy=((keys.has("ArrowRight")||keys.has("d"))?1:0)-((keys.has("ArrowLeft")||keys.has("a"))?1:0);}
+function keyJoyUpdate(){keyJoy=((keys.has("ArrowRight")||keys.has("d"))?1:0)-((keys.has("ArrowLeft")||keys.has("a"))?1:0);
+  keyJoyY=(keys.has("ArrowDown")||keys.has("s"))?1:0;}
 cv.addEventListener("keydown",e=>{
   const k=e.key.length===1?e.key.toLowerCase():e.key;
-  if(["ArrowLeft","ArrowRight","ArrowUp"," ","a","d","w","k"].includes(k)) e.preventDefault();
+  if(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"," ","a","d","w","s","k"].includes(k)) e.preventDefault();
   if(e.repeat) return;
   if(screen==="title" && (k==="ArrowUp"||k==="ArrowDown")){ scrollMap(k==="ArrowUp"?-60:60); return; }
   if(k==="Escape"||k==="p"){ if(screen==="play") screen="pause"; else if(screen==="pause") screen="play"; return; }
@@ -1613,7 +1730,7 @@ cv.addEventListener("keyup",e=>{
   keys.delete(k); keyJoyUpdate();
   if(k===" "||k==="k") shootKey=false;
 });
-cv.addEventListener("blur",()=>{keys.clear();keyJoy=0;shootKey=false;});
+cv.addEventListener("blur",()=>{keys.clear();keyJoy=0;keyJoyY=0;shootKey=false;});
 
 // ---------- loop ----------
 let last=performance.now();
