@@ -625,7 +625,12 @@ const ARENAS=[
   {name:"Titan Dome",        p:"#8C5A2B",s:"#1A1A1A",wood:"#C48B55",e:"wings"},
   {name:"Hoops 4 Life Arena",p:"#10152B",s:"#FFC93C",wood:"#D99A5B",e:"crest"}
 ];
-function currentArena(){return mode==="level" && (screen==="play"||screen==="pause"||screen==="over") ? ARENAS[Math.floor(level/STOPS)%ARENAS.length] : null;}
+// levels play in their own arena; quick games and practice play in the arena of the level the player has reached
+function currentArena(){
+  if(!(screen==="play"||screen==="pause"||screen==="over")) return null;
+  const n = mode==="level" ? level : Math.min(progress[human],LEVELS-1);
+  return ARENAS[Math.floor(n/STOPS)%ARENAS.length];
+}
 // emblem shapes, drawn in a unit circle (radius 1) centred on 0,0
 function emblemShape(kind){
   const P=pts=>{ctx.beginPath(); pts.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.closePath();};
