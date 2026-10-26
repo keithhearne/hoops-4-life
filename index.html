@@ -923,7 +923,9 @@ function levelSkill(n){
     atkSpeed:L(100,165), fadeChance:L(0.25,0.85), dunkTry:L(0.08,0.45), dunkMake:L(0.38,0.62), blockDunk:L(0.08,0.42),
     dblChance:L(0.05,0.5)};
 }
-function openLevel(n){level=n; mode="level"; screen="setup";}
+let pickByPlayer=false;   // true when the level comes from the 1 v 1 button, so either boy can pick up his own next level
+function openLevel(n,byPlayer){level=n; mode="level"; screen="setup"; pickByPlayer=!!byPlayer;}
+function openNextLevel(){openLevel(Math.min(progress[human],LEVELS-1),true);}
 function tapMap(q){
   const cy=q.y-VIEW.y+mapScroll;
   for(let r=0;r<ROADS.length;r++) for(let i=0;i<STOPS;i++){
@@ -1067,12 +1069,13 @@ function drawTitle(){
   let ts=40; ctx.font=DISP(ts); while(ts>22 && ctx.measureText("HOOPS 4 LIFE").width>bw){ts-=2; ctx.font=DISP(ts);}
   bigTitle("HOOPS 4 LIFE",cx,40,ts,"center");
   text(BOYS.zackie.name+" vs "+BOYS.keelan.name,cx,74,BODY(15,900),C.ink,"center");
-  button(bx,92,bw,50,"1 v 1 vs COMPUTER",{fill:"#2F6FE4",sub:"Quick game · first to 21"},()=>openSetup("vs"));
+  button(bx,92,bw,50,"1 v 1 vs COMPUTER",{fill:"#2F6FE4",sub:BOYS[human].name+" · "+(progress[human]>=LEVELS?"all levels beaten!":levelName(progress[human]))},openNextLevel);
   button(bx,150,bw,50,"SHOOTING PRACTICE",{fill:"#F26B1D",ink:C.navy,sub:"No defender"},()=>openSetup("practice"));
   button(bx,208,bw,42,"TABLE MODE",{disabled:true,sub:"2 players, 1 phone · coming soon"});
   button(bx,258,bw,42,"TWO PHONES",{disabled:true,sub:"2 players over Wi-Fi · coming soon"});
-  text("WINS VS THE COMPUTER",cx,326,BODY(11,900),C.muted,"center");
-  text(BOYS.zackie.name+"  "+(wins.zackie||0)+"   ·   "+BOYS.keelan.name+"  "+(wins.keelan||0),cx,346,BODY(15,900),C.ink,"center");
+  const at=b=>progress[b]>=LEVELS?"done!":"L"+(Math.floor(progress[b]/STOPS)+1)+" · P"+(progress[b]%STOPS+1);
+  text("WHERE EACH BOY IS UP TO",cx,326,BODY(11,900),C.muted,"center");
+  text(BOYS.zackie.name+"  "+at("zackie")+"     "+BOYS.keelan.name+"  "+at("keelan"),cx,346,BODY(15,900),C.ink,"center");
 }
 function swatch(cx,cy,r,col,sel,disabled,fn){
   ctx.globalAlpha=disabled?0.25:1;
@@ -1085,7 +1088,8 @@ function swatch(cx,cy,r,col,sel,disabled,fn){
 }
 function playerCard(boy,x,y,w,h){
   const sel=boy===human, k=kits[boy], b=BOYS[boy];
-  if(mode!=="level") ui.push({x,y,w,h,fn:()=>{human=boy;}});   // on a level, the boy whose map it is plays
+  // from the map the boy whose map it is plays; from the 1 v 1 button either boy can pick and gets his own next level
+  if(mode!=="level"||pickByPlayer) ui.push({x,y,w,h,fn:()=>{human=boy; if(mode==="level") level=Math.min(progress[boy],LEVELS-1);}});
   ctx.fillStyle=sel?"rgba(46,56,102,0.98)":"rgba(27,35,64,0.95)"; rr(x,y,w,h,18); ctx.fill();
   ctx.strokeStyle=sel?C.warn:"rgba(255,255,255,0.15)"; ctx.lineWidth=sel?4:2; ctx.stroke();
   // player preview in his kit
@@ -1107,14 +1111,14 @@ function playerCard(boy,x,y,w,h){
   Object.keys(TRIMS).forEach((t,i)=>{const same=TRIMS[t]===MAINS[k.main];
     swatch(tx+13+i*27,y+144,10,TRIMS[t],k.trim===t,same,()=>{k.trim=t; refreshManga(boy);});});
   text(niceKit(k),tx,y+180,BODY(14,900),C.ink);
-  const hint=sel?"Ready to play":(mode==="level"?"Plays as the computer":"Tap the card to "+(mode==="vs"?"play as ":"pick ")+b.name);
+  const hint=sel?"Ready to play":((mode==="level"&&!pickByPlayer)?"Plays as the computer":"Tap the card to "+(mode==="practice"?"pick ":"play as ")+b.name);
   text(hint,tx,y+h-22,BODY(12,800),sel?C.warn:C.muted);
 }
 function drawSetup(){
   ui=[]; drawCourt(); shade(0.8);
   const heads={vs:["WHO'S PLAYING?","Tap a card to play as him. The other one is the computer. Pick jersey and trim colours."],
     practice:["WHO'S PRACTISING?","Tap a card to pick who practises, and choose the kit."],
-    level:[levelName(level).toUpperCase(),BOYS[human].name+" vs the computer at "+ARENAS[Math.floor(level/STOPS)].name+" · first to "+levelTarget(level)]};
+    level:[levelName(level).toUpperCase(),BOYS[human].name+" vs the computer at "+ARENAS[Math.floor(level/STOPS)].name+" · first to "+levelTarget(level)+(pickByPlayer?" · tap a card to choose who plays":"")]};
   text(heads[mode][0],W/2,26,DISP(22),C.warn,"center");
   text(heads[mode][1],W/2,47,BODY(13,800),C.muted,"center");
   playerCard("zackie",22,62,390,262);
@@ -1596,7 +1600,7 @@ cv.addEventListener("keydown",e=>{
   if(screen==="title" && (k==="ArrowUp"||k==="ArrowDown")){ scrollMap(k==="ArrowUp"?-60:60); return; }
   if(k==="Escape"||k==="p"){ if(screen==="play") screen="pause"; else if(screen==="pause") screen="play"; return; }
   if(k==="Enter"){
-    if(screen==="title") openSetup("vs"); else if(screen==="setup") tryStart();
+    if(screen==="title") openNextLevel(); else if(screen==="setup") tryStart();
     else if(screen==="over") startGame(); else if(screen==="pause") screen="play";
     return;
   }
