@@ -63,7 +63,8 @@ canvas:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 
 <script>
 (function(){
-const W=844, H=390, FLOOR=310, G=1100, GB=900, FILL=1.75, WIN=21;
+const W=844, H=390, FLOOR=310, G=1100, GB=900, FILL=1.75;
+let WIN=21;   // points needed to win; levels change it
 const RR={x:757,y:184,board:777,front:737,dir:1};   // right hoop: Player 1 attacks it
 const RL={x:87,y:184,board:67,front:107,dir:-1};    // left hoop: computer attacks it
 const THREE=550, HALF=422;
@@ -126,8 +127,9 @@ let owner=p, cpuOn=true, gameOverT=0, inboundT=0, pendingInbound=null;
 const dunk={on:false,t:0,x0:0,success:false,resolved:false,hang:0};
 const cdunk={on:false,t:0,x0:0,success:false,resolved:false,hang:0};
 // How good the computer is. Raise or lower these to tune it.
-const SKILL={noReact:0.2, timingNoise:0.35, defSpeed:160, chaseSpeed:178, atkSpeed:135, fadeChance:0.65,
+const SKILL_BASE={acc:1, noReact:0.2, timingNoise:0.35, defSpeed:160, chaseSpeed:178, atkSpeed:135, fadeChance:0.65,
   dunkTry:0.3, dunkMake:0.5, blockDunk:0.25, dblChance:0.33};
+let SKILL=Object.assign({},SKILL_BASE);   // the quick 1 v 1 game uses SKILL_BASE; each level sets its own
 const CPU_DUNK_X=W-DUNK_X;
 let shakeT=0, needRelease=false;
 // double jump timing: the window is the top of the first jump, while the player is nearly still in the air
@@ -221,7 +223,7 @@ function release(auto){
 // ---------- computer shooting ----------
 function cpuRelease(){
   const z=zoneFor(d.x,RL), h=handPos(d,-1,true);
-  const chance=z.cpu*(cpu.fade?0.85:1), make=Math.random()<chance;
+  const chance=Math.min(0.95,z.cpu*SKILL.acc*(cpu.fade?0.85:1)), make=Math.random()<chance;
   const s=Math.random()<0.5?-1:1, tx=make?RL.x:RL.x+s*(26+Math.random()*34);
   const sp=shotPath(h.x,h.y,tx,RL.y);
   const over=(tx-RL.x)*RL.dir>0;
@@ -676,31 +678,41 @@ function loadSave(){
     for(const b of ["zackie","keelan"]) if(s.kits&&s.kits[b]&&MAINS[s.kits[b].main]&&TRIMS[s.kits[b].trim]) kits[b]=s.kits[b];
     if(BOYS[s.human]) human=s.human;
     if(s.wins) wins=Object.assign({zackie:0,keelan:0},s.wins);
+    if(s.progress) progress=Object.assign({zackie:0,keelan:0},s.progress);
   }catch(_){}
 }
-function saveGame(){try{localStorage.setItem(SAVE_KEY,JSON.stringify({kits,human,wins}));}catch(_){}}
+function saveGame(){try{localStorage.setItem(SAVE_KEY,JSON.stringify({kits,human,wins,progress}));}catch(_){}}
 
 // ---------- screens: title, setup, play, pause, game over ----------
 let screen="title", mode="vs", overWinner="p", ui=[];
 function startGame(){
   applyLooks();
   Object.assign(stats,{score:0,cpu:0,made:0,att:0,streak:0,best:0,threes:0,dunks:0,blk:0});
-  cpuOn = mode==="vs";
+  if(mode==="level"){SKILL=levelSkill(level); WIN=levelTarget(level);}
+  else {SKILL=Object.assign({},SKILL_BASE); WIN=21;}
+  cpuOn = mode!=="practice";
   pendingInbound=null; gameOverT=0; celebrate.t=0; charge.shown=0; dblFx.t=0; cpuFx.t=0;
   moods.p.m=moods.d.m="happy"; moods.p.t=moods.d.t=0;
   touchJoy=0; shootTouch=false; shootKey=false; needRelease=true;
   lastShot="Hold SHOOT, let go in the green zone";
   inbound("p"); screen="play";
-  if(cpuOn) say(NAME.p+" vs "+NAME.d,"First to "+WIN+" wins",C.ink);
+  if(mode==="level") say(levelName(level),NAME.p+" vs "+NAME.d+" · first to "+WIN,C.ink);
+  else if(cpuOn) say(NAME.p+" vs "+NAME.d,"First to "+WIN+" wins",C.ink);
   else say("Shooting practice",NAME.p+", shoot as much as you like",C.ink);
 }
 function endGame(){
   const youWin=stats.score>=WIN; overWinner=youWin?"p":"d";
   if(youWin) wins[human]=(wins[human]||0)+1;
+  newRoad=false;
+  if(mode==="level" && youWin && level>=progress[human]){
+    progress[human]=Math.min(LEVELS,level+1);
+    newRoad = progress[human]<LEVELS && progress[human]%STOPS===0;
+  }
   saveGame(); screen="over";
 }
 function openSetup(m){mode=m; screen="setup";}
-function tryStart(){ if(mode==="vs" && kits.zackie.main===kits.keelan.main) return; saveGame(); startGame(); }
+function tryStart(){ if(mode!=="practice" && kits.zackie.main===kits.keelan.main) return; saveGame(); startGame(); }
+function toMap(){screen="title"; mapScroll=null;}
 function button(x,y,w,h,label,o,fn){
   o=o||{};
   ctx.globalAlpha=o.disabled?0.45:1;
@@ -755,9 +767,10 @@ function bigTitle(t,x,y,size,align){
 }
 // ---------- road map: zig-zag roads of numbered stops, scrolled up and down ----------
 const MAP={x:16,y:16,w:300,h:358};
-const ROADS=[{name:"ROAD 1",col:"#2F6FE4"},{name:"ROAD 2",col:"#F26B1D"},{name:"ROAD 3",col:"#1FA35B"}];
+const ROAD_COLS=["#2F6FE4","#F26B1D","#1FA35B","#7B4FD6","#E03A3A","#14A3B8","#D4A017","#E0559A"];
+const ROADS=Array.from({length:30},(_,i)=>({name:"LEVEL "+(i+1),col:ROAD_COLS[i%ROAD_COLS.length]}));
 const STOPS=7, STOP_GAP=58, STOP_R=20, ROAD_GAP=110, BOTTOM_PAD=62;
-let mapScroll=null, mapDrag=null;   // null = not set yet; the map opens scrolled to the bottom, where road 1 starts
+let mapScroll=null, mapDrag=null, mapMsg={text:"",t:0};   // null = scroll to the current level next time the map is drawn
 // roads climb upward: road 1 at the bottom, stop 1 at the bottom of each road
 const LEAD=56;   // straight stretch (about 1 cm on a phone) from stop 1 before the zig-zag begins
 // the same straight stretch is used at both ends: after stop 1 and before stop 7
@@ -768,44 +781,107 @@ function stopPos(r,i){ // map-local position of stop i (0-6) on road r; stops al
   const x = (i===0||i===STOPS-1) ? MAP.w/2 : (i%2===1 ? MAP.w-62 : 62);
   return {x:MAP.x+x, y:mapContentH()-upY(r,i)};
 }
-function mapMaxScroll(){return Math.max(0,mapContentH()-MAP.h);}
+const VIEW={y:MAP.y+48,h:MAP.h-48};   // the scrolling part of the map, under the Zackie/Keelan tabs
+function mapMaxScroll(){return Math.max(0,mapContentH()-VIEW.h);}
+// ---------- levels: every stop is a 1 v 1 game, each one a bit harder than the last ----------
+const LEVELS=ROADS.length*STOPS;
+let progress={zackie:0,keelan:0}, level=0, newRoad=false;   // progress = how many levels that boy has beaten
+function levelName(n){return "Level "+(Math.floor(n/STOPS)+1)+" · Part "+(n%STOPS+1);}
+function levelTarget(n){const lv=Math.floor(n/STOPS); return lv<10?11:(lv<20?15:21);}   // longer games in later levels
+function levelSkill(n){
+  const t=n/(LEVELS-1), L=(a,b)=>a+(b-a)*t;   // level 1 = easiest, last level = hardest
+  return {acc:L(0.6,1.25), noReact:L(0.5,0.06), timingNoise:L(0.6,0.16), defSpeed:L(115,195), chaseSpeed:L(135,210),
+    atkSpeed:L(100,165), fadeChance:L(0.25,0.85), dunkTry:L(0.08,0.45), dunkMake:L(0.38,0.62), blockDunk:L(0.08,0.42),
+    dblChance:L(0.05,0.5)};
+}
+function openLevel(n){level=n; mode="level"; screen="setup";}
+function tapMap(q){
+  const cy=q.y-VIEW.y+mapScroll;
+  for(let r=0;r<ROADS.length;r++) for(let i=0;i<STOPS;i++){
+    const s=stopPos(r,i), n=r*STOPS+i;
+    if(Math.hypot(q.x-s.x,cy-s.y)<STOP_R+10){
+      if(n<=progress[human]) openLevel(n);
+      else mapMsg={text:"Win "+levelName(progress[human])+" first",t:1.8};
+      return;
+    }
+  }
+}
+function padlock(x,y,col){
+  ctx.strokeStyle=col; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(x,y-3,3.6,Math.PI,0); ctx.stroke();
+  ctx.fillStyle=col; rr(x-5.5,y-3,11,8,2); ctx.fill();
+}
 function scrollMap(dy){mapScroll=clamp(mapScroll+dy,0,mapMaxScroll());}
 function drawRoadMap(){
-  if(mapScroll===null) mapScroll=mapMaxScroll();
+  const prog=progress[human];
+  if(mapScroll===null){ // centre on the level this boy should play next
+    const n=Math.min(prog,LEVELS-1), sp=stopPos(Math.floor(n/STOPS),n%STOPS);
+    mapScroll=clamp(sp.y-VIEW.h*0.62,0,mapMaxScroll());
+  }
   ctx.save();
   ctx.fillStyle="rgba(16,21,43,0.96)"; rr(MAP.x,MAP.y,MAP.w,MAP.h,18); ctx.fill();
   ctx.strokeStyle="rgba(255,255,255,0.14)"; ctx.lineWidth=2; ctx.stroke();
-  rr(MAP.x,MAP.y,MAP.w,MAP.h,18); ctx.clip();
-  ctx.translate(0,MAP.y-mapScroll);
+  // whose map: one tab per boy
+  const tw=(MAP.w-30)/2;
+  ["zackie","keelan"].forEach((boy,k)=>{
+    const x=MAP.x+10+k*(tw+10), sel=boy===human, col=MAINS[kits[boy].main];
+    ctx.fillStyle=sel?col:"rgba(46,56,102,0.9)"; rr(x,MAP.y+9,tw,32,12); ctx.fill();
+    if(sel){ctx.strokeStyle=C.ink; ctx.lineWidth=2; ctx.stroke();}
+    text(BOYS[boy].name.toUpperCase()+"  ·  LVL "+Math.min(Math.floor(progress[boy]/STOPS)+1,ROADS.length),x+tw/2,MAP.y+26,BODY(13,900),sel?inkOn(col):C.muted,"center");
+    ui.push({x,y:MAP.y+5,w:tw,h:40,fn:()=>{if(human!==boy){human=boy; mapScroll=null; saveGame();}}});
+  });
+  ctx.beginPath(); ctx.rect(MAP.x,VIEW.y,MAP.w,VIEW.h); ctx.clip();
+  ctx.translate(0,VIEW.y-mapScroll);
+  const locked="#39416A", pulse=1+0.12*Math.sin(performance.now()/180);
   ROADS.forEach((road,r)=>{
-    const start=stopPos(r,0);
-    text(road.name,MAP.x+MAP.w/2,start.y+34,DISP(16),C.ink,"center");   // label under stop 1, where the road begins
-    // the road: a straight line from each stop to the next
-    ctx.strokeStyle=road.col; ctx.lineWidth=5; ctx.lineCap="round"; ctx.lineJoin="round";
-    ctx.beginPath();
-    for(let i=0;i<STOPS;i++){const s=stopPos(r,i);
-      if(i===0){ctx.moveTo(s.x,s.y); ctx.lineTo(s.x,s.y-LEAD);}
-      else if(i===STOPS-1){ctx.lineTo(s.x,s.y+LEAD); ctx.lineTo(s.x,s.y);}
-      else ctx.lineTo(s.x,s.y);}
-    ctx.stroke();
-    // numbered circles at the start and at every corner
+    const start=stopPos(r,0), open=r*STOPS<=prog;
+    if(start.y+50<mapScroll || stopPos(r,STOPS-1).y-40>mapScroll+VIEW.h) return;   // off screen
+    text(road.name+(open?"":" · LOCKED"),MAP.x+MAP.w/2,start.y+34,DISP(15),open?C.ink:C.muted,"center");
+    // the road: straight lines between the stops; the part leading to locked levels is grey
+    const pts=[];
+    for(let i=0;i<STOPS;i++){const sp=stopPos(r,i);
+      if(i===0){pts.push([sp.x,sp.y,0]); pts.push([sp.x,sp.y-LEAD,1]);}
+      else if(i===STOPS-1){pts.push([sp.x,sp.y+LEAD,i]); pts.push([sp.x,sp.y,i]);}
+      else pts.push([sp.x,sp.y,i]);}
+    ctx.lineWidth=5; ctx.lineCap="round"; ctx.lineJoin="round";
+    for(let k=0;k<pts.length-1;k++){
+      ctx.strokeStyle=(r*STOPS+pts[k+1][2]<=prog)?road.col:locked;
+      ctx.beginPath(); ctx.moveTo(pts[k][0],pts[k][1]); ctx.lineTo(pts[k+1][0],pts[k+1][1]); ctx.stroke();
+    }
+    // the levels
     for(let i=0;i<STOPS;i++){
-      const s=stopPos(r,i);
-      ctx.fillStyle=road.col; ctx.beginPath(); ctx.arc(s.x,s.y,STOP_R,0,Math.PI*2); ctx.fill();
-      ctx.strokeStyle=C.ink; ctx.lineWidth=3; ctx.stroke();
-      text(String(i+1),s.x,s.y+1,DISP(18),inkOn(road.col),"center");
+      const sp=stopPos(r,i), n=r*STOPS+i, done=n<prog, cur=n===prog, R=cur?STOP_R*1.1:STOP_R;
+      if(cur){ctx.strokeStyle=C.warn; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(sp.x,sp.y,(STOP_R+7)*pulse,0,Math.PI*2); ctx.stroke();}
+      ctx.fillStyle=(done||cur)?road.col:locked; ctx.beginPath(); ctx.arc(sp.x,sp.y,R,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle=(done||cur)?C.ink:"rgba(255,255,255,0.35)"; ctx.lineWidth=3; ctx.stroke();
+      text(String(i+1),sp.x,sp.y+1,DISP(18),(done||cur)?inkOn(road.col):"rgba(255,255,255,0.45)","center");
+      if(done){ // gold tick badge for a beaten level
+        ctx.fillStyle=C.warn; ctx.beginPath(); ctx.arc(sp.x+15,sp.y-14,8,0,Math.PI*2); ctx.fill();
+        ctx.strokeStyle=C.navy; ctx.lineWidth=2.4; ctx.beginPath(); ctx.moveTo(sp.x+11,sp.y-14); ctx.lineTo(sp.x+14,sp.y-11); ctx.lineTo(sp.x+19,sp.y-17); ctx.stroke();
+      } else if(!cur){
+        ctx.fillStyle=C.navy; ctx.beginPath(); ctx.arc(sp.x+15,sp.y+14,8,0,Math.PI*2); ctx.fill();
+        padlock(sp.x+15,sp.y+15,C.muted);
+      }
+      if(cur){const left=sp.x>MAP.x+MAP.w/2; text("PLAY",sp.x+(left?-1:1)*(R+12),sp.y+1,DISP(13),C.warn,left?"right":"left");}
     }
   });
   ctx.restore();
   // scroll bar
   const max=mapMaxScroll();
   if(max>0){
-    const track=MAP.h-24, bar=Math.max(36,track*MAP.h/(MAP.h+max)), by=MAP.y+12+(track-bar)*(mapScroll/max);
-    ctx.fillStyle="rgba(255,255,255,0.12)"; rr(MAP.x+MAP.w-10,MAP.y+12,4,track,2); ctx.fill();
+    const track=VIEW.h-20, bar=Math.max(36,track*VIEW.h/(VIEW.h+max)), by=VIEW.y+10+(track-bar)*(mapScroll/max);
+    ctx.fillStyle="rgba(255,255,255,0.12)"; rr(MAP.x+MAP.w-10,VIEW.y+10,4,track,2); ctx.fill();
     ctx.fillStyle="rgba(255,255,255,0.55)"; rr(MAP.x+MAP.w-10,by,4,bar,2); ctx.fill();
   }
+  if(mapMsg.t>0){
+    mapMsg.t-=1/60;
+    ctx.globalAlpha=Math.min(1,mapMsg.t*3);
+    ctx.font=BODY(13,900); const w=ctx.measureText(mapMsg.text).width+24;
+    ctx.fillStyle="rgba(10,14,30,0.95)"; rr(MAP.x+MAP.w/2-w/2,MAP.y+MAP.h-44,w,30,12); ctx.fill();
+    text(mapMsg.text,MAP.x+MAP.w/2,MAP.y+MAP.h-29,BODY(13,900),C.warn,"center");
+    ctx.globalAlpha=1;
+  }
 }
-function inMap(q){return q.x>=MAP.x&&q.x<=MAP.x+MAP.w&&q.y>=MAP.y&&q.y<=MAP.y+MAP.h;}
+function inMap(q){return q.x>=MAP.x&&q.x<=MAP.x+MAP.w&&q.y>=VIEW.y&&q.y<=VIEW.y+VIEW.h;}
 function drawTitle(){
   ui=[]; drawCourt(); drawNetLayer(false); drawNetLayer(true); shade(0.72);
   // road map on the left, title and game modes in a column on the right
@@ -814,7 +890,7 @@ function drawTitle(){
   let ts=40; ctx.font=DISP(ts); while(ts>22 && ctx.measureText("HOOPS 4 LIFE").width>bw){ts-=2; ctx.font=DISP(ts);}
   bigTitle("HOOPS 4 LIFE",cx,40,ts,"center");
   text(BOYS.zackie.name+" vs "+BOYS.keelan.name,cx,74,BODY(15,900),C.ink,"center");
-  button(bx,92,bw,50,"1 v 1 vs COMPUTER",{fill:"#2F6FE4",sub:"First to "+WIN},()=>openSetup("vs"));
+  button(bx,92,bw,50,"1 v 1 vs COMPUTER",{fill:"#2F6FE4",sub:"Quick game · first to 21"},()=>openSetup("vs"));
   button(bx,150,bw,50,"SHOOTING PRACTICE",{fill:"#F26B1D",ink:C.navy,sub:"No defender"},()=>openSetup("practice"));
   button(bx,208,bw,42,"TABLE MODE",{disabled:true,sub:"2 players, 1 phone · coming soon"});
   button(bx,258,bw,42,"TWO PHONES",{disabled:true,sub:"2 players over Wi-Fi · coming soon"});
@@ -832,7 +908,7 @@ function swatch(cx,cy,r,col,sel,disabled,fn){
 }
 function playerCard(boy,x,y,w,h){
   const sel=boy===human, k=kits[boy], b=BOYS[boy];
-  ui.push({x,y,w,h,fn:()=>{human=boy;}});
+  if(mode!=="level") ui.push({x,y,w,h,fn:()=>{human=boy;}});   // on a level, the boy whose map it is plays
   ctx.fillStyle=sel?"rgba(46,56,102,0.98)":"rgba(27,35,64,0.95)"; rr(x,y,w,h,18); ctx.fill();
   ctx.strokeStyle=sel?C.warn:"rgba(255,255,255,0.15)"; ctx.lineWidth=sel?4:2; ctx.stroke();
   // player preview in his kit
@@ -841,7 +917,7 @@ function playerCard(boy,x,y,w,h){
   ctx.translate(x+80,y+h-12); ctx.scale(1.95,1.95);
   drawAthlete({x:0,y:0,lean:0,spd:0,run:0},kitLook(b,k,1),{x:14,y:-34},{x:-12,y:-26},false,false);
   ctx.restore();
-  const tag=sel?"PLAYING":(mode==="vs"?"COMPUTER":"WATCHING");
+  const tag=sel?"PLAYING":(mode==="practice"?"WATCHING":"COMPUTER");
   ctx.fillStyle=sel?C.warn:C.panel; rr(x+12,y+12,100,24,12); ctx.fill();
   text(tag,x+62,y+24,BODY(12,900),sel?C.navy:C.muted,"center");
   const tx=x+160;
@@ -854,16 +930,20 @@ function playerCard(boy,x,y,w,h){
   Object.keys(TRIMS).forEach((t,i)=>{const same=TRIMS[t]===MAINS[k.main];
     swatch(tx+13+i*27,y+144,10,TRIMS[t],k.trim===t,same,()=>{k.trim=t; refreshManga(boy);});});
   text(niceKit(k),tx,y+180,BODY(14,900),C.ink);
-  text(sel?"Ready to play":"Tap the card to "+(mode==="vs"?"play as ":"pick ")+b.name,tx,y+h-22,BODY(12,800),sel?C.warn:C.muted);
+  const hint=sel?"Ready to play":(mode==="level"?"Plays as the computer":"Tap the card to "+(mode==="vs"?"play as ":"pick ")+b.name);
+  text(hint,tx,y+h-22,BODY(12,800),sel?C.warn:C.muted);
 }
 function drawSetup(){
   ui=[]; drawCourt(); shade(0.8);
-  text(mode==="vs"?"WHO'S PLAYING?":"WHO'S PRACTISING?",W/2,26,DISP(22),C.warn,"center");
-  text(mode==="vs"?"Tap a card to play as him. The other one is the computer. Pick jersey and trim colours.":"Tap a card to pick who practises, and choose the kit.",W/2,47,BODY(13,800),C.muted,"center");
+  const heads={vs:["WHO'S PLAYING?","Tap a card to play as him. The other one is the computer. Pick jersey and trim colours."],
+    practice:["WHO'S PRACTISING?","Tap a card to pick who practises, and choose the kit."],
+    level:[levelName(level).toUpperCase(),BOYS[human].name+" vs the computer · first to "+levelTarget(level)+" · pick jersey and trim colours"]};
+  text(heads[mode][0],W/2,26,DISP(22),C.warn,"center");
+  text(heads[mode][1],W/2,47,BODY(13,800),C.muted,"center");
   playerCard("zackie",22,62,390,262);
   playerCard("keelan",432,62,390,262);
-  const clash=mode==="vs" && kits.zackie.main===kits.keelan.main;
-  button(22,336,130,42,"BACK",{},()=>{screen="title";});
+  const clash=mode!=="practice" && kits.zackie.main===kits.keelan.main;
+  button(22,336,130,42,"BACK",{},toMap);
   if(clash) text("Pick different jersey colours",W/2,357,BODY(14,900),C.warn,"center");
   button(W-22-210,336,210,42,"START",{fill:"#F26B1D",ink:C.navy,disabled:clash},tryStart);
 }
@@ -873,25 +953,33 @@ function drawPause(){
   const bx=W/2-150;
   button(bx,134,300,50,"RESUME",{fill:"#2F6FE4"},()=>{screen="play"; needRelease=true;});
   button(bx,194,300,44,"RESTART",{outline:"rgba(255,255,255,0.3)"},()=>startGame());
-  button(bx,248,300,44,"MAIN MENU",{outline:"rgba(255,255,255,0.3)"},()=>{screen="title";});
+  button(bx,248,300,44,"MAIN MENU",{outline:"rgba(255,255,255,0.3)"},toMap);
 }
 function drawOver(){
   ui=[]; shade(0.84);
   const youWin=overWinner==="p", boy=youWin?human:other();
   portraitBadge(boy,180,186,112);
   let size=40; ctx.font=DISP(size);
-  const head=(youWin?NAME.p:NAME.d).toUpperCase()+" WINS!";
+  const lv=mode==="level", allDone=lv && youWin && level===LEVELS-1;
+  const head=allDone?"ALL 30 LEVELS DONE!":(lv&&youWin?(level%STOPS===STOPS-1?"LEVEL "+(Math.floor(level/STOPS)+1)+" COMPLETE!":"PART "+(level%STOPS+1)+" WON!"):(youWin?NAME.p:NAME.d).toUpperCase()+" WINS!");
   while(size>24 && ctx.measureText(head).width>470){size-=2; ctx.font=DISP(size);}
   bigTitle(head,330,62,size,"left");
   text(NAME.p+"  "+stats.score+"  –  "+stats.cpu+"  "+NAME.d,332,104,BODY(20,900),C.ink);
-  text(NAME.p.toUpperCase()+"'S GAME",332,140,BODY(12,900),C.muted);
+  if(lv) text(levelName(level).toUpperCase()+(newRoad?"   ·   LEVEL "+(Math.floor(progress[human]/STOPS)+1)+" IS OPEN!":""),332,140,BODY(12,900),newRoad?C.warn:C.muted);
+  else text(NAME.p.toUpperCase()+"'S GAME",332,140,BODY(12,900),C.muted);
   const rows=[["Shots made",stats.made+" / "+stats.att],["3-pointers",String(stats.threes)],["Dunks",String(stats.dunks)],
     ["Blocks",String(stats.blk)],["Best streak",String(stats.best)],["Wins vs computer",String(wins[human]||0)]];
   rows.forEach(([l,v],i)=>{const cx=332+(i%2)*236, cy=168+Math.floor(i/2)*38;
     ctx.fillStyle="rgba(46,56,102,0.9)"; rr(cx,cy-15,224,32,10); ctx.fill();
     text(l,cx+12,cy+1,BODY(14,800),C.muted); text(v,cx+212,cy+2,DISP(16),C.ink,"right");});
-  button(332,312,220,50,"REMATCH",{fill:"#F26B1D",ink:C.navy},()=>startGame());
-  button(564,312,140,50,"MENU",{outline:"rgba(255,255,255,0.3)"},()=>{screen="title";});
+  if(lv){
+    if(youWin && level<LEVELS-1) button(332,312,220,50,(level+1)%STOPS===0?"NEXT LEVEL":"NEXT PART",{fill:"#F26B1D",ink:C.navy,sub:levelName(level+1)},()=>{level++; startGame();});
+    else button(332,312,220,50,youWin?"PLAY AGAIN":"TRY AGAIN",{fill:"#F26B1D",ink:C.navy},()=>startGame());
+    button(564,312,140,50,"MAP",{outline:"rgba(255,255,255,0.3)"},toMap);
+  } else {
+    button(332,312,220,50,"REMATCH",{fill:"#F26B1D",ink:C.navy},()=>startGame());
+    button(564,312,140,50,"MENU",{outline:"rgba(255,255,255,0.3)"},toMap);
+  }
 }
 
 // two-segment limb from a joint to an end point, bending the middle joint toward (px,py)
@@ -1288,13 +1376,12 @@ function toLocal(e){const r=cv.getBoundingClientRect();return {x:(e.clientX-r.le
 cv.addEventListener("pointerdown",e=>{
   const q=toLocal(e); let role=null;
   if(screen!=="play"){
-    if(screen==="title" && inMap(q)){
-      mapDrag={id:e.pointerId,y0:q.y,s0:mapScroll};
-      try{cv.setPointerCapture(e.pointerId);}catch(_){}
-      e.preventDefault(); return;
-    }
     for(let i=ui.length-1;i>=0;i--){const u=ui[i];
-      if(q.x>=u.x&&q.x<=u.x+u.w&&q.y>=u.y&&q.y<=u.y+u.h){u.fn();break;}}
+      if(q.x>=u.x&&q.x<=u.x+u.w&&q.y>=u.y&&q.y<=u.y+u.h){u.fn(); e.preventDefault(); return;}}
+    if(screen==="title" && inMap(q)){
+      mapDrag={id:e.pointerId,y0:q.y,s0:mapScroll,moved:false};
+      try{cv.setPointerCapture(e.pointerId);}catch(_){}
+    }
     e.preventDefault(); return;
   }
   if(q.x>=PAUSE_BTN.x-6&&q.x<=PAUSE_BTN.x+PAUSE_BTN.w+6&&q.y>=PAUSE_BTN.y-6&&q.y<=PAUSE_BTN.y+PAUSE_BTN.h+6){
@@ -1307,7 +1394,8 @@ cv.addEventListener("pointerdown",e=>{
   e.preventDefault();
 });
 cv.addEventListener("pointermove",e=>{
-  if(mapDrag && mapDrag.id===e.pointerId){const q=toLocal(e); mapScroll=clamp(mapDrag.s0-(q.y-mapDrag.y0),0,mapMaxScroll()); return;}
+  if(mapDrag && mapDrag.id===e.pointerId){const q=toLocal(e); if(Math.abs(q.y-mapDrag.y0)>7) mapDrag.moved=true;
+    mapScroll=clamp(mapDrag.s0-(q.y-mapDrag.y0),0,mapMaxScroll()); return;}
   if(roles.get(e.pointerId)==="joy"){const q=toLocal(e);touchJoy=clamp((q.x-JOY.x)/40,-1,1);}
 });
 cv.addEventListener("wheel",e=>{
@@ -1315,7 +1403,7 @@ cv.addEventListener("wheel",e=>{
   scrollMap(e.deltaY*0.6); e.preventDefault();
 },{passive:false});
 function endPointer(e){
-  if(mapDrag && mapDrag.id===e.pointerId) mapDrag=null;
+  if(mapDrag && mapDrag.id===e.pointerId){ if(!mapDrag.moved && e.type==="pointerup") tapMap(toLocal(e)); mapDrag=null; }
   const role=roles.get(e.pointerId);
   if(role==="joy") touchJoy=0;
   if(role==="shoot") shootTouch=false;
