@@ -223,15 +223,27 @@ function startBoardFx(side,wind){
   boardFx={t:T,T,side,shatter:wind,shards,bolts:makeBolts(side),flash:0.32,boltT:wind?0.7:0.5};
   shakeT=Math.max(shakeT,wind?0.6:0.4);
 }
-// the phone screen "cracks" from a point near the middle, spreading out in jagged lines with rings between them
+// the phone screen cracks: a small smash in the middle, cracks creep out slowly and speed up,
+// then the whole screen shatters at once; the effect lasts 2 seconds
+const CRACK_T=2.0, CRACK_SMASH=0.15, CRACK_ALL=1.3;
+function withLengths(pts){let d=0; const cum=[0]; for(let i=1;i<pts.length;i++){d+=Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]); cum.push(d);} return {pts,cum,len:d};}
 function startCrackFx(){
-  const cx=W/2+(Math.random()-0.5)*80, cy=150+(Math.random()-0.5)*30, n=14, lines=[], rings=[];
-  for(let i=0;i<n;i++){const a=i/n*Math.PI*2+(Math.random()-0.5)*0.35, len=360+Math.random()*320;
-    lines.push(jagged(cx,cy,cx+Math.cos(a)*len,cy+Math.sin(a)*len,10,22));}
-  for(const r of [28,70,130]){const ring=[];
-    for(let i=0;i<n;i++){const a=i/n*Math.PI*2+(Math.random()-0.5)*0.2, rr2=r*(0.8+Math.random()*0.4); ring.push([cx+Math.cos(a)*rr2,cy+Math.sin(a)*rr2]);}
-    rings.push(ring);}
-  crackFx={t:2.8,T:2.8,lines,rings,cx,cy};
+  const cx=W/2+(Math.random()-0.5)*60, cy=H/2-20+(Math.random()-0.5)*30, n=16, lines=[], rings=[], branches=[];
+  for(let i=0;i<n;i++){const a=i/n*Math.PI*2+(Math.random()-0.5)*0.35, len=560+Math.random()*200;
+    lines.push(withLengths(jagged(cx,cy,cx+Math.cos(a)*len,cy+Math.sin(a)*len,16,20)));}
+  for(const r of [16,38,74,130,210,300]){const ring=[];
+    for(let i=0;i<n;i++){const a=i/n*Math.PI*2+(Math.random()-0.5)*0.2, r2=r*(0.8+Math.random()*0.4); ring.push([cx+Math.cos(a)*r2,cy+Math.sin(a)*r2]);}
+    rings.push({r,ring});}
+  for(let k=0;k<34;k++){   // side cracks that appear when the whole screen goes
+    const l=lines[Math.floor(Math.random()*n)], j=4+Math.floor(Math.random()*(l.pts.length-5)), [x0,y0]=l.pts[j];
+    const base=Math.atan2(y0-cy,x0-cx), a=base+(Math.random()<0.5?-1:1)*(0.5+Math.random()*0.7), len=50+Math.random()*170;
+    branches.push(jagged(x0,y0,x0+Math.cos(a)*len,y0+Math.sin(a)*len,6,14));}
+  crackFx={t:CRACK_T,T:CRACK_T,lines,rings,branches,cx,cy,shook:false};
+}
+function crackReach(e){   // how far from the middle the cracks have spread, e seconds after the smash
+  if(e<CRACK_SMASH) return 22*Math.min(1,e/0.1);
+  if(e<CRACK_ALL) return 22+(260-22)*Math.pow((e-CRACK_SMASH)/(CRACK_ALL-CRACK_SMASH),2.6);   // slow, then faster
+  return Infinity;
 }
 function updateFx(dt){
   if(boardFx.t>0){
@@ -242,7 +254,11 @@ function updateFx(dt){
       if(s.y>FLOOR-2){s.y=FLOOR-2; s.vy*=-0.25; s.vx*=0.6; s.vr*=0.5;}
     }
   }
-  if(crackFx.t>0) crackFx.t-=dt;
+  if(crackFx.t>0){
+    crackFx.t-=dt;
+    if(!crackFx.shook && crackFx.T-crackFx.t>=CRACK_ALL){crackFx.shook=true; shakeT=Math.max(shakeT,0.3);}
+  }
+
 }
 function boardGone(side){return boardFx.t>0.5 && boardFx.shatter && boardFx.side===side;}
 function drawBoardFx(){
@@ -267,16 +283,24 @@ function drawBoardFx(){
 function drawScreenFx(){
   if(boardFx.t>0 && boardFx.flash>0){ctx.fillStyle="rgba(255,255,255,"+(Math.min(1,boardFx.flash/0.32)*0.7).toFixed(3)+")"; ctx.fillRect(0,0,W,H);}
   if(crackFx.t<=0) return;
-  const grow=Math.min(1,(crackFx.T-crackFx.t)/0.12);
-  ctx.save(); ctx.globalAlpha=Math.min(1,crackFx.t/0.6); ctx.lineJoin="round"; ctx.lineCap="round";
-  for(const [w,col] of [[3,"rgba(0,0,0,0.35)"],[1.4,"rgba(255,255,255,0.92)"]]){
+  const e=crackFx.T-crackFx.t, reach=crackReach(e), all=e>=CRACK_ALL;
+  ctx.save(); ctx.globalAlpha=e>1.6?Math.max(0,(CRACK_T-e)/0.4):1; ctx.lineJoin="round"; ctx.lineCap="round";
+  const partial=l=>{ctx.beginPath(); ctx.moveTo(l.pts[0][0],l.pts[0][1]);
+    for(let i=1;i<l.pts.length;i++){
+      if(l.cum[i]<=reach){ctx.lineTo(l.pts[i][0],l.pts[i][1]); continue;}
+      const u=(reach-l.cum[i-1])/(l.cum[i]-l.cum[i-1]); ctx.lineTo(l.pts[i-1][0]+(l.pts[i][0]-l.pts[i-1][0])*u, l.pts[i-1][1]+(l.pts[i][1]-l.pts[i-1][1])*u); break;}
+    ctx.stroke();};
+  for(const [w,col] of [[3.2,"rgba(0,0,0,0.38)"],[1.5,"rgba(255,255,255,0.95)"]]){
     ctx.strokeStyle=col; ctx.lineWidth=w;
-    for(const l of crackFx.lines){const n=Math.max(2,Math.ceil(l.length*grow)); ctx.beginPath(); for(let i=0;i<n;i++){const [x,y]=l[i]; i?ctx.lineTo(x,y):ctx.moveTo(x,y);} ctx.stroke();}
-    if(grow>=1) for(const r of crackFx.rings){ctx.beginPath(); r.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.closePath(); ctx.stroke();}
+    for(const l of crackFx.lines) partial(l);
+    for(const {r,ring} of crackFx.rings) if(reach>=r*1.15){ctx.beginPath(); ring.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.closePath(); ctx.stroke();}
+    if(all) for(const b of crackFx.branches){ctx.beginPath(); b.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.stroke();}
   }
-  const g=ctx.createRadialGradient(crackFx.cx,crackFx.cy,0,crackFx.cx,crackFx.cy,40);
-  g.addColorStop(0,"rgba(255,255,255,0.7)"); g.addColorStop(1,"rgba(255,255,255,0)");
-  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(crackFx.cx,crackFx.cy,40,0,Math.PI*2); ctx.fill();
+  // the smash point glints, and the screen flashes as it all goes
+  const glow=Math.min(60,18+reach*0.25), g=ctx.createRadialGradient(crackFx.cx,crackFx.cy,0,crackFx.cx,crackFx.cy,glow);
+  g.addColorStop(0,"rgba(255,255,255,0.8)"); g.addColorStop(1,"rgba(255,255,255,0)");
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(crackFx.cx,crackFx.cy,glow,0,Math.PI*2); ctx.fill();
+  if(all && e<CRACK_ALL+0.15){ctx.fillStyle="rgba(255,255,255,"+(0.45*(1-(e-CRACK_ALL)/0.15)).toFixed(3)+")"; ctx.fillRect(0,0,W,H);}
   ctx.restore();
 }
 // where the hand (and ball) is during a windmill: from overhead, 180 degrees round behind the back to down low,
