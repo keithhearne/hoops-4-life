@@ -755,16 +755,18 @@ function bigTitle(t,x,y,size,align){
 }
 function drawTitle(){
   ui=[]; drawCourt(); drawNetLayer(false); drawNetLayer(true); shade(0.72);
-  portraitBadge("zackie",140,196,92,true); text(BOYS.zackie.name.toUpperCase(),140,306,DISP(18),C.ink,"center");
-  portraitBadge("keelan",W-140,196,92,true); text(BOYS.keelan.name.toUpperCase(),W-140,306,DISP(18),C.ink,"center");
-  bigTitle("HOOPS 4 LIFE",W/2,58,48);
-  text(BOYS.zackie.name+" vs "+BOYS.keelan.name,W/2,98,BODY(16,900),C.muted,"center");
-  const bx=W/2-160, bw=320;
-  button(bx,122,bw,50,"1 v 1 vs COMPUTER",{fill:"#2F6FE4",sub:"First to "+WIN},()=>openSetup("vs"));
-  button(bx,180,bw,50,"SHOOTING PRACTICE",{fill:"#F26B1D",ink:C.navy,sub:"No defender"},()=>openSetup("practice"));
-  button(bx,238,bw,42,"TABLE MODE",{disabled:true,sub:"2 players, 1 phone · coming soon"});
-  button(bx,288,bw,42,"TWO PHONES",{disabled:true,sub:"2 players over Wi-Fi · coming soon"});
-  text("Wins vs the computer:  "+BOYS.zackie.name+" "+(wins.zackie||0)+"  ·  "+BOYS.keelan.name+" "+(wins.keelan||0),W/2,358,BODY(14,900),C.muted,"center");
+  // title and wins on the left, game modes in a column on the right
+  const tx=44;
+  bigTitle("HOOPS",tx,128,62,"left");
+  bigTitle("4 LIFE",tx,194,62,"left");
+  text(BOYS.zackie.name+" vs "+BOYS.keelan.name,tx+2,240,BODY(18,900),C.ink,"left");
+  text("WINS VS THE COMPUTER",tx+2,286,BODY(12,900),C.muted,"left");
+  text(BOYS.zackie.name+"  "+(wins.zackie||0)+"   ·   "+BOYS.keelan.name+"  "+(wins.keelan||0),tx+2,308,BODY(16,900),C.ink,"left");
+  const bw=320, bx=W-16-bw;
+  button(bx,91,bw,50,"1 v 1 vs COMPUTER",{fill:"#2F6FE4",sub:"First to "+WIN},()=>openSetup("vs"));
+  button(bx,149,bw,50,"SHOOTING PRACTICE",{fill:"#F26B1D",ink:C.navy,sub:"No defender"},()=>openSetup("practice"));
+  button(bx,207,bw,42,"TABLE MODE",{disabled:true,sub:"2 players, 1 phone · coming soon"});
+  button(bx,257,bw,42,"TWO PHONES",{disabled:true,sub:"2 players over Wi-Fi · coming soon"});
 }
 function swatch(cx,cy,r,col,sel,disabled,fn){
   ctx.globalAlpha=disabled?0.25:1;
