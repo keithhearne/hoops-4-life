@@ -87,6 +87,7 @@ const COMMENTS={
   auto:["Held it too long! It's in orbit!","Houston, we have a problem!","Let GO next time!","That one's going to space!"],
   block:["REJECTED!","Not in my house!","Get that outta here!","Return to sender!","DENIED!"],
   dunk:["SLAM DUNK!","BOOM! Throw it DOWN!","Posterized!","Hang on that rim!","MONSTER JAM!","Rattled the backboard!"],
+  save:["SAVED!","What a save!","Goalkeeper!","Not today!","Swatted at the rim!","Denied at the door!"],
   steal:["PICKPOCKET!","STOLEN!","Hand in the cookie jar!","Too slow!","Snatched it!","MINE NOW!"],
   stealMiss:["Missed the steal!","Just missed it!","Swipe and a miss!","He held on!"],
   lucky:["Shooter's roll!","It rolls in!","Lucky bounce!","Friendly rim!","Kissed it in!"],
@@ -132,7 +133,7 @@ const cdunk={on:false,t:0,x0:0,success:false,resolved:false,hang:0};
 // How good the computer is. Raise or lower these to tune it.
 const SKILL_BASE={acc:1, noReact:0.2, timingNoise:0.35, defSpeed:160, chaseSpeed:178, atkSpeed:135, fadeChance:0.65,
   dunkTry:0.3, dunkMake:0.5, blockDunk:0.25, dblChance:0.33};
-SKILL_BASE.stealChance=0.45;
+SKILL_BASE.stealChance=0.45; SKILL_BASE.saveChance=0.25;
 let SKILL=Object.assign({},SKILL_BASE);   // the quick 1 v 1 game uses SKILL_BASE; each level sets its own
 const CPU_DUNK_X=W-DUNK_X;
 let shakeT=0, needRelease=false;
@@ -239,7 +240,7 @@ function release(auto){
   const tx=targetFor(pw,range,auto), sp=shotPath(h.x,h.y,tx,RR.y);
   const missType=auto?"auto":(pw<range[0]?(pw<range[0]-25?"air":"short"):"long");
   Object.assign(ball,{state:"flight",x0:h.x,y0:h.y,x:h.x,y:h.y,vx:sp.vx,vy:sp.vy,T:sp.T,t:0,make,pts:z.pts,timer:0,
-    shooter:p,missType,dunk:false,lucky:false,live:false,fade:charge.fade,far:z===ZONES.far});
+    shooter:p,missType,dunk:false,lucky:false,live:false,saveTried:false,fade:charge.fade,far:z===ZONES.far});
   owner=null; stats.att++;
   charge.lastPower=pw; charge.shown=1.2; charge.range=range; charge.zone=z;
   lastShot = auto ? "Held too long: the ball flew off at 100"
@@ -250,7 +251,7 @@ function release(auto){
 function cpuRelease(){
   const z=zoneFor(d.x,RL), h=handPos(d,-1,true);
   const chance=Math.min(0.95,z.cpu*SKILL.acc*(cpu.fade?0.85:1)), make=Math.random()<chance;
-  const s=Math.random()<0.5?-1:1, tx=make?RL.x:(s>0?RL.x+20+Math.random()*16:RL.x-6-Math.random()*12);   // front of the rim, or back of the rim
+  const s=Math.random()<0.5?-1:1, tx=make?RL.x:(s>0?RL.x+20+Math.random()*16:RL.x-Math.min(15,11.8+Math.random()*2.6));   // front of the rim, or back of the rim
   const sp=shotPath(h.x,h.y,tx,RL.y);
   const over=(tx-RL.x)*RL.dir>0;
   Object.assign(ball,{state:"flight",x0:h.x,y0:h.y,x:h.x,y:h.y,vx:sp.vx,vy:sp.vy,T:sp.T,t:0,make,pts:z.pts,timer:0,
@@ -389,13 +390,16 @@ function update(dt){
       for(let k=0;k<n && !hit;k++){ ball.vy+=GB*h; ball.x+=ball.vx*h; ball.y+=ball.vy*h; hit=collideHoops(); }
     }
     const early=t<ball.T*0.55;
-    if(early && ball.shooter===p && cpuArmUp()){
+    // the save: the ball is coming down close to the hoop, and a defender's hand gets to it above the rim
+    const rimX=ball.shooter===p?RR.x:RL.x, vyNow=ball.make?ball.vy+GB*t:ball.vy;
+    const saveZone=vyNow>0 && Math.abs(ball.x-rimX)<95 && ball.y<RIM_Y+2;
+    if((early||saveZone) && ball.shooter===p && cpuArmUp()){
       const hd=cpuHand();
-      if(Math.hypot(ball.x-hd.x,ball.y-hd.y)<18){blocked(d);return;}
+      if(Math.hypot(ball.x-hd.x,ball.y-hd.y)<18){blocked(d,!early);return;}
     }
-    if(early && ball.shooter===d && playerArmUp()){
+    if((early||saveZone) && ball.shooter===d && playerArmUp()){
       const hd=playerHand();
-      if(Math.hypot(ball.x-hd.x,ball.y-hd.y)<18){blocked(p);return;}
+      if(Math.hypot(ball.x-hd.x,ball.y-hd.y)<18){blocked(p,!early);return;}
     }
     if(ball.make){ if(t>=ball.T) arrive(t); }
     else if(hit || t>=ball.T+0.25 || ball.y>FLOOR-BALL_R) missNow();
@@ -504,16 +508,18 @@ function setCpuPlan(){
   cpu.dunk=Math.random()<SKILL.dunkTry;
   cpu.spot=cpu.dunk ? 115+Math.random()*40 : pickSpot();
 }
-function blocked(by){
+function blocked(by,save){
   const shooterDir = ball.shooter===p ? 1 : -1;
-  ball.state="free"; ball.vx=shooterDir*60; ball.vy=60; ball.timer=0; ball.live=false;
+  ball.state="free"; ball.timer=0; ball.live=false;
+  if(save){ball.vx=-shooterDir*(140+Math.random()*70); ball.vy=-90;}   // swatted away from the hoop
+  else {ball.vx=shooterDir*60; ball.vy=60;}
   if(by===d){
     stats.streak=0;
-    say(pick("block"),"Blocked! Try a fade-away: pull back while you hold SHOOT",C.warn);
-    lastShot="Blocked by the defender";
+    say(pick(save?"save":"block"),save?NAME.d+" saved it at the rim!":"Blocked! Try a fade-away: pull back while you hold SHOOT",C.warn);
+    lastShot=save?"Saved by "+NAME.d:"Blocked by the defender";
   } else {
-    say(pick("block"),"You blocked it! Grab the ball!",C.info);
-    lastShot="You blocked "+NAME.d; stats.blk++;
+    say(pick(save?"save":"block"),save?"What a save! Grab the ball!":"You blocked it! Grab the ball!",C.info);
+    lastShot=(save?"You saved it from ":"You blocked ")+NAME.d; stats.blk++;
   }
   setMood(by===d?p:d,"shock"); setMood(by,"happy"); celebrateFor(by);
 }
@@ -579,6 +585,12 @@ function cpuUpdate(dt){
     } else {
       cpu.t+=dt; if(cpu.fade) d.x=Math.min(d.x+40*dt,800);
       if(cpu.t>=cpu.hold) cpuRelease();
+    }
+  } else if(ball.state==="flight" && ball.shooter===p){
+    const target=RR.x+8, step=SKILL.chaseSpeed*dt;   // hand reaches just in front of the rim
+    if(Math.abs(target-d.x)>step) d.x+=Math.sign(target-d.x)*step;
+    if(!ball.saveTried && d.ground && ball.T-ball.t<=0.36 && Math.abs(d.x-target)<40){
+      ball.saveTried=true; if(Math.random()<SKILL.saveChance) cpuJump(-380);
     }
   } else if(ball.state==="free"){
     const step=SKILL.chaseSpeed*dt;
@@ -1018,7 +1030,7 @@ function levelSkill(n){
   const t=n/(LEVELS-1), L=(a,b)=>a+(b-a)*t;   // level 1 = easiest, last level = hardest
   return {acc:L(0.6,1.25), noReact:L(0.5,0.06), timingNoise:L(0.6,0.16), defSpeed:L(115,195), chaseSpeed:L(135,210),
     atkSpeed:L(100,165), fadeChance:L(0.25,0.85), dunkTry:L(0.08,0.45), dunkMake:L(0.38,0.62), blockDunk:L(0.08,0.42),
-    dblChance:L(0.05,0.5), stealChance:L(0.6,0.3)};
+    dblChance:L(0.05,0.5), stealChance:L(0.6,0.3), saveChance:L(0.08,0.45)};
 }
 let pickByPlayer=false;   // true when the level comes from the 1 v 1 button, so either boy can pick up his own next level
 function openLevel(n,byPlayer){level=n; mode="level"; screen="setup"; pickByPlayer=!!byPlayer;}
