@@ -958,7 +958,10 @@ function drawRoadMap(){
   const locked="#39416A", pulse=1+0.12*Math.sin(performance.now()/180);
   ROADS.forEach((road,r)=>{
     const start=stopPos(r,0), open=r*STOPS<=prog;
-    if(start.y+50<mapScroll || stopPos(r,STOPS-1).y-40>mapScroll+VIEW.h) return;   // off screen
+    if(start.y+70<mapScroll || stopPos(r,STOPS-1).y-140>mapScroll+VIEW.h) return;   // off screen
+    // the level's arena emblem, big and faded, behind its road
+    const midY=(start.y+stopPos(r,STOPS-1).y)/2;
+    ctx.save(); ctx.globalAlpha=open?0.42:0.16; drawEmblem(ARENAS[r],MAP.x+MAP.w/2,midY,124); ctx.restore();
     text(road.name+(open?"":" · LOCKED"),MAP.x+MAP.w/2,start.y+34,DISP(15),open?C.ink:C.muted,"center");
     text(road.arena,MAP.x+MAP.w/2,start.y+52,BODY(11,800),C.muted,"center");
     // the road: straight lines between the stops; the part leading to locked levels is grey
