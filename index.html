@@ -759,7 +759,8 @@ const ROADS=[{name:"ROAD 1",col:"#2F6FE4"},{name:"ROAD 2",col:"#F26B1D"},{name:"
 const STOPS=7, STOP_GAP=58, STOP_R=20, ROAD_GAP=110, BOTTOM_PAD=62;
 let mapScroll=null, mapDrag=null;   // null = not set yet; the map opens scrolled to the bottom, where road 1 starts
 // roads climb upward: road 1 at the bottom, stop 1 at the bottom of each road
-function upY(r,i){return BOTTOM_PAD+r*((STOPS-1)*STOP_GAP+ROAD_GAP)+i*STOP_GAP;}   // height above the bottom of the map
+const LEAD=56;   // straight stretch (about 1 cm on a phone) from stop 1 before the zig-zag begins
+function upY(r,i){return BOTTOM_PAD+r*((STOPS-1)*STOP_GAP+LEAD+ROAD_GAP)+i*STOP_GAP+(i>0?LEAD:0);}   // height above the bottom of the map
 function mapContentH(){return upY(ROADS.length-1,STOPS-1)+STOP_R+30;}
 function stopPos(r,i){ // map-local position of stop i (0-6) on road r; stops alternate sides to make the zig-zag
   // first and last stop sit in the middle; the ones between alternate right and left
@@ -781,7 +782,8 @@ function drawRoadMap(){
     // the road: a straight line from each stop to the next
     ctx.strokeStyle=road.col; ctx.lineWidth=5; ctx.lineCap="round"; ctx.lineJoin="round";
     ctx.beginPath();
-    for(let i=0;i<STOPS;i++){const s=stopPos(r,i); if(i) ctx.lineTo(s.x,s.y); else ctx.moveTo(s.x,s.y);}
+    for(let i=0;i<STOPS;i++){const s=stopPos(r,i);
+      if(i) ctx.lineTo(s.x,s.y); else {ctx.moveTo(s.x,s.y); ctx.lineTo(s.x,s.y-LEAD);}}
     ctx.stroke();
     // numbered circles at the start and at every corner
     for(let i=0;i<STOPS;i++){
