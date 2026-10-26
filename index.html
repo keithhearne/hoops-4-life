@@ -753,20 +753,63 @@ function bigTitle(t,x,y,size,align){
   ctx.lineWidth=7; ctx.lineJoin="round"; ctx.strokeStyle=C.navy; ctx.strokeText(t,x,y);
   ctx.fillStyle=C.warn; ctx.fillText(t,x,y);
 }
+// ---------- road map: zig-zag roads of numbered stops, scrolled up and down ----------
+const MAP={x:16,y:16,w:476,h:358};
+const ROADS=[{name:"ROAD 1",col:"#2F6FE4"},{name:"ROAD 2",col:"#F26B1D"},{name:"ROAD 3",col:"#1FA35B"}];
+const STOPS=7, STOP_GAP=58, STOP_R=20, ROAD_GAP=96, ROAD_TOP=46;
+let mapScroll=0, mapDrag=null;
+function roadTop(r){return 18+r*((STOPS-1)*STOP_GAP+ROAD_TOP+ROAD_GAP);}
+function stopPos(r,i){ // map-local position of stop i (0-6) on road r; stops alternate sides to make the zig-zag
+  return {x:MAP.x+(i%2===0?84:MAP.w-84), y:roadTop(r)+ROAD_TOP+i*STOP_GAP};
+}
+function mapMaxScroll(){return Math.max(0,stopPos(ROADS.length-1,STOPS-1).y+STOP_R+34-MAP.h);}
+function scrollMap(dy){mapScroll=clamp(mapScroll+dy,0,mapMaxScroll());}
+function drawRoadMap(){
+  ctx.save();
+  ctx.fillStyle="rgba(16,21,43,0.96)"; rr(MAP.x,MAP.y,MAP.w,MAP.h,18); ctx.fill();
+  ctx.strokeStyle="rgba(255,255,255,0.14)"; ctx.lineWidth=2; ctx.stroke();
+  rr(MAP.x,MAP.y,MAP.w,MAP.h,18); ctx.clip();
+  ctx.translate(0,MAP.y-mapScroll);
+  ROADS.forEach((road,r)=>{
+    const top=roadTop(r);
+    text(road.name,MAP.x+MAP.w/2,top+12,DISP(16),C.ink,"center");
+    // the road: a straight line from each stop to the next
+    ctx.strokeStyle=road.col; ctx.lineWidth=5; ctx.lineCap="round"; ctx.lineJoin="round";
+    ctx.beginPath();
+    for(let i=0;i<STOPS;i++){const s=stopPos(r,i); if(i) ctx.lineTo(s.x,s.y); else ctx.moveTo(s.x,s.y);}
+    ctx.stroke();
+    // numbered circles at the start and at every corner
+    for(let i=0;i<STOPS;i++){
+      const s=stopPos(r,i);
+      ctx.fillStyle=road.col; ctx.beginPath(); ctx.arc(s.x,s.y,STOP_R,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle=C.ink; ctx.lineWidth=3; ctx.stroke();
+      text(String(i+1),s.x,s.y+1,DISP(18),inkOn(road.col),"center");
+    }
+  });
+  ctx.restore();
+  // scroll bar
+  const max=mapMaxScroll();
+  if(max>0){
+    const track=MAP.h-24, bar=Math.max(36,track*MAP.h/(MAP.h+max)), by=MAP.y+12+(track-bar)*(mapScroll/max);
+    ctx.fillStyle="rgba(255,255,255,0.12)"; rr(MAP.x+MAP.w-10,MAP.y+12,4,track,2); ctx.fill();
+    ctx.fillStyle="rgba(255,255,255,0.55)"; rr(MAP.x+MAP.w-10,by,4,bar,2); ctx.fill();
+  }
+}
+function inMap(q){return q.x>=MAP.x&&q.x<=MAP.x+MAP.w&&q.y>=MAP.y&&q.y<=MAP.y+MAP.h;}
 function drawTitle(){
   ui=[]; drawCourt(); drawNetLayer(false); drawNetLayer(true); shade(0.72);
-  // title and wins on the left, game modes in a column on the right
-  const tx=44;
-  bigTitle("HOOPS",tx,128,62,"left");
-  bigTitle("4 LIFE",tx,194,62,"left");
-  text(BOYS.zackie.name+" vs "+BOYS.keelan.name,tx+2,240,BODY(18,900),C.ink,"left");
-  text("WINS VS THE COMPUTER",tx+2,286,BODY(12,900),C.muted,"left");
-  text(BOYS.zackie.name+"  "+(wins.zackie||0)+"   ·   "+BOYS.keelan.name+"  "+(wins.keelan||0),tx+2,308,BODY(16,900),C.ink,"left");
-  const bw=320, bx=W-16-bw;
-  button(bx,91,bw,50,"1 v 1 vs COMPUTER",{fill:"#2F6FE4",sub:"First to "+WIN},()=>openSetup("vs"));
-  button(bx,149,bw,50,"SHOOTING PRACTICE",{fill:"#F26B1D",ink:C.navy,sub:"No defender"},()=>openSetup("practice"));
-  button(bx,207,bw,42,"TABLE MODE",{disabled:true,sub:"2 players, 1 phone · coming soon"});
-  button(bx,257,bw,42,"TWO PHONES",{disabled:true,sub:"2 players over Wi-Fi · coming soon"});
+  // road map on the left, title and game modes in a column on the right
+  drawRoadMap();
+  const bw=320, bx=W-16-bw, cx=bx+bw/2;
+  let ts=40; ctx.font=DISP(ts); while(ts>22 && ctx.measureText("HOOPS 4 LIFE").width>bw){ts-=2; ctx.font=DISP(ts);}
+  bigTitle("HOOPS 4 LIFE",cx,40,ts,"center");
+  text(BOYS.zackie.name+" vs "+BOYS.keelan.name,cx,74,BODY(15,900),C.ink,"center");
+  button(bx,92,bw,50,"1 v 1 vs COMPUTER",{fill:"#2F6FE4",sub:"First to "+WIN},()=>openSetup("vs"));
+  button(bx,150,bw,50,"SHOOTING PRACTICE",{fill:"#F26B1D",ink:C.navy,sub:"No defender"},()=>openSetup("practice"));
+  button(bx,208,bw,42,"TABLE MODE",{disabled:true,sub:"2 players, 1 phone · coming soon"});
+  button(bx,258,bw,42,"TWO PHONES",{disabled:true,sub:"2 players over Wi-Fi · coming soon"});
+  text("WINS VS THE COMPUTER",cx,326,BODY(11,900),C.muted,"center");
+  text(BOYS.zackie.name+"  "+(wins.zackie||0)+"   ·   "+BOYS.keelan.name+"  "+(wins.keelan||0),cx,346,BODY(15,900),C.ink,"center");
 }
 function swatch(cx,cy,r,col,sel,disabled,fn){
   ctx.globalAlpha=disabled?0.25:1;
@@ -1235,6 +1278,11 @@ function toLocal(e){const r=cv.getBoundingClientRect();return {x:(e.clientX-r.le
 cv.addEventListener("pointerdown",e=>{
   const q=toLocal(e); let role=null;
   if(screen!=="play"){
+    if(screen==="title" && inMap(q)){
+      mapDrag={id:e.pointerId,y0:q.y,s0:mapScroll};
+      try{cv.setPointerCapture(e.pointerId);}catch(_){}
+      e.preventDefault(); return;
+    }
     for(let i=ui.length-1;i>=0;i--){const u=ui[i];
       if(q.x>=u.x&&q.x<=u.x+u.w&&q.y>=u.y&&q.y<=u.y+u.h){u.fn();break;}}
     e.preventDefault(); return;
@@ -1249,9 +1297,15 @@ cv.addEventListener("pointerdown",e=>{
   e.preventDefault();
 });
 cv.addEventListener("pointermove",e=>{
+  if(mapDrag && mapDrag.id===e.pointerId){const q=toLocal(e); mapScroll=clamp(mapDrag.s0-(q.y-mapDrag.y0),0,mapMaxScroll()); return;}
   if(roles.get(e.pointerId)==="joy"){const q=toLocal(e);touchJoy=clamp((q.x-JOY.x)/40,-1,1);}
 });
+cv.addEventListener("wheel",e=>{
+  if(screen!=="title") return;
+  scrollMap(e.deltaY*0.6); e.preventDefault();
+},{passive:false});
 function endPointer(e){
+  if(mapDrag && mapDrag.id===e.pointerId) mapDrag=null;
   const role=roles.get(e.pointerId);
   if(role==="joy") touchJoy=0;
   if(role==="shoot") shootTouch=false;
@@ -1264,6 +1318,7 @@ cv.addEventListener("keydown",e=>{
   const k=e.key.length===1?e.key.toLowerCase():e.key;
   if(["ArrowLeft","ArrowRight","ArrowUp"," ","a","d","w","k"].includes(k)) e.preventDefault();
   if(e.repeat) return;
+  if(screen==="title" && (k==="ArrowUp"||k==="ArrowDown")){ scrollMap(k==="ArrowUp"?-60:60); return; }
   if(k==="Escape"||k==="p"){ if(screen==="play") screen="pause"; else if(screen==="pause") screen="play"; return; }
   if(k==="Enter"){
     if(screen==="title") openSetup("vs"); else if(screen==="setup") tryStart();
