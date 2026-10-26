@@ -754,7 +754,7 @@ function bigTitle(t,x,y,size,align){
   ctx.fillStyle=C.warn; ctx.fillText(t,x,y);
 }
 // ---------- road map: zig-zag roads of numbered stops, scrolled up and down ----------
-const MAP={x:16,y:16,w:476,h:358};
+const MAP={x:16,y:16,w:300,h:358};
 const ROADS=[{name:"ROAD 1",col:"#2F6FE4"},{name:"ROAD 2",col:"#F26B1D"},{name:"ROAD 3",col:"#1FA35B"}];
 const STOPS=7, STOP_GAP=58, STOP_R=20, ROAD_GAP=110, BOTTOM_PAD=62;
 let mapScroll=null, mapDrag=null;   // null = not set yet; the map opens scrolled to the bottom, where road 1 starts
@@ -762,7 +762,7 @@ let mapScroll=null, mapDrag=null;   // null = not set yet; the map opens scrolle
 function upY(r,i){return BOTTOM_PAD+r*((STOPS-1)*STOP_GAP+ROAD_GAP)+i*STOP_GAP;}   // height above the bottom of the map
 function mapContentH(){return upY(ROADS.length-1,STOPS-1)+STOP_R+30;}
 function stopPos(r,i){ // map-local position of stop i (0-6) on road r; stops alternate sides to make the zig-zag
-  return {x:MAP.x+(i%2===0?84:MAP.w-84), y:mapContentH()-upY(r,i)};
+  return {x:MAP.x+(i%2===0?62:MAP.w-62), y:mapContentH()-upY(r,i)};
 }
 function mapMaxScroll(){return Math.max(0,mapContentH()-MAP.h);}
 function scrollMap(dy){mapScroll=clamp(mapScroll+dy,0,mapMaxScroll());}
