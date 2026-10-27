@@ -291,7 +291,13 @@ function audioInit(){   // phones only allow sound after the first tap, so this 
     const AC=window.AudioContext||window.webkitAudioContext; if(!AC) return;
     SND.ctx=new AC(); SND.master=SND.ctx.createGain(); SND.master.gain.value=SND.on?0.55:0;
     const lim=SND.ctx.createDynamicsCompressor(); lim.threshold.value=-8; lim.knee.value=6; lim.ratio.value=12; lim.attack.value=0.003; lim.release.value=0.2;
-    SND.master.connect(lim); lim.connect(SND.ctx.destination);
+    // a gentle EQ so nothing is harsh: soften the treble, take the edge off the top, add a touch of warmth
+    const c=SND.ctx, shelf=c.createBiquadFilter(), top=c.createBiquadFilter(), warm=c.createBiquadFilter(), bite=c.createBiquadFilter();
+    shelf.type="highshelf"; shelf.frequency.value=3500; shelf.gain.value=-6;
+    bite.type="peaking"; bite.frequency.value=2800; bite.Q.value=1.2; bite.gain.value=-3;
+    top.type="lowpass"; top.frequency.value=9000; top.Q.value=0.5;
+    warm.type="lowshelf"; warm.frequency.value=250; warm.gain.value=2;
+    SND.master.connect(bite); bite.connect(shelf); shelf.connect(top); top.connect(warm); warm.connect(lim); lim.connect(c.destination);
     loadSamples();
     const n=SND.ctx.sampleRate, buf=SND.ctx.createBuffer(1,n,n), d=buf.getChannelData(0);
     for(let i=0;i<n;i++) d[i]=Math.random()*2-1;
