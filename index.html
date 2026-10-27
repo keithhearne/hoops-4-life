@@ -1772,12 +1772,12 @@ function drawMedal(x,y,r){   // a gold medal on a ribbon
   ctx.closePath(); ctx.fill(); ctx.strokeStyle="#B07A00"; ctx.lineWidth=1; ctx.stroke();
   ctx.restore();
 }
-// the middle of the menu: how many medals and boss crowns the selected boy has won
-function drawTrophies(boy,cx,y){
+// the middle of the menu ("prizes"): how many medals and boss crowns the selected boy has won
+function drawPrizes(boy,cx,y){
   const w=176, x=cx-w/2, h=208, col=MAINS[kits[boy].main];
   ctx.fillStyle="rgba(16,21,43,0.92)"; rr(x,y,w,h,18); ctx.fill();
   ctx.strokeStyle=col; ctx.lineWidth=3; ctx.stroke();
-  text(BOYS[boy].name.toUpperCase()+"'S TROPHIES",cx,y+20,BODY(12,900),C.muted,"center");
+  text(BOYS[boy].name.toUpperCase()+"'S PRIZES",cx,y+20,BODY(12,900),C.muted,"center");
   const nMed=medals[boy].length, nCrown=crowns[boy].length, maxMed=LEVELS-ROADS.length, maxCrown=ROADS.length;
   drawMedal(x+44,y+76,20);
   text(String(nMed),x+76,y+66,DISP(30),C.ink); text("MEDALS · of "+maxMed,x+77,y+92,BODY(10,900),C.muted);
@@ -1793,7 +1793,7 @@ function drawTitle(){
   const bw=320, bx=W-16-bw, cx=bx+bw/2;
   let ts=40; ctx.font=DISP(ts); while(ts>22 && ctx.measureText("HOOPS 4 LIFE").width>bw){ts-=2; ctx.font=DISP(ts);}
   bigTitle("HOOPS 4 LIFE",cx,40,ts,"center");
-  drawTrophies(human,412,92);
+  drawPrizes(human,412,92);
   text(BOYS.zackie.name+" vs "+BOYS.keelan.name,cx,74,BODY(15,900),C.ink,"center");
   button(bx,92,bw,50,"1 v 1 vs COMPUTER",{fill:"#2F6FE4",sub:BOYS[human].name+" · "+(progress[human]>=LEVELS?"all levels beaten!":levelName(progress[human]))},openNextLevel);
   button(bx,150,bw,50,"SHOOTING PRACTICE",{fill:"#F26B1D",ink:C.navy,sub:"No defender"},()=>openSetup("practice"));
