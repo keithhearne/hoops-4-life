@@ -197,10 +197,147 @@ function inbound(who){
   if(who==="p"||!cpuOn){owner=p; p.x=380; d.x=440;}
   else {owner=d; d.x=470; p.x=360; setCpuPlan();}
 }
+// ---------- jump ball to start a game: the referee whistles and tosses the ball up between the two players ----------
+const TIP_X=422, TIP_TOSS_AT=1.0, TIP_WHISTLE_AT=0.55;
+let tip={on:false,t:0,tt:0,tossed:false,whistled:false,cpuAt:99,fade:0};
+const REF_LOOK={dir:1,jersey:"#F4F4F1",trim:"#22232B",shorts:"#22232B",skin:"#C98F66",skinDark:"#A8714E",hair:"#2A2A2A",hairHi:"#4A4A4A",
+  brow:"#2A2A2A",eye:"#3A2A1A",style:"crop",gapTeeth:false,bigEars:false,num:"",numCol:"#22232B",shoe:"#22232B",sole:"#F4F4F1",sock:"#22232B",stripes:true};
+function startTip(){
+  owner=null; ball.state="tip"; ball.x=TIP_X; ball.y=FLOOR-62; ball.vx=0; ball.vy=0;
+  p.x=TIP_X-26; d.x=TIP_X+26; d.jumped=false;
+  // when the computer jumps: the perfect moment, plus a random error that gets smaller on later levels
+  const ideal=0.4;
+  tip={on:true,t:0,tt:0,tossed:false,whistled:false,fade:0,
+    cpuAt: Math.random()<SKILL.noReact*0.5 ? 99 : ideal+(Math.random()*2-1)*SKILL.timingNoise*0.55};
+  say("JUMP BALL!","Tap JUMP as the ball comes down to win it",C.warn); msg.t=1.05;   // gone before the toss so the ball is in view
+}
+function updateTip(dt){
+  tip.t+=dt;
+  if(!tip.whistled && tip.t>=TIP_WHISTLE_AT){tip.whistled=true; play("whistle");}
+  if(!tip.tossed){
+    ball.x=TIP_X; ball.y=FLOOR-62;
+    if(tip.t>=TIP_TOSS_AT){tip.tossed=true; tip.tt=0; ball.vy=-Math.sqrt(2*GB*(FLOOR-62-135));}   // up to about head-and-a-half height
+    return;
+  }
+  tip.tt+=dt;
+  ball.vy+=GB*dt; ball.y+=ball.vy*dt; ball.rot=(ball.rot||0)+dt*3;
+  if(!d.jumped && d.ground && tip.tt>=tip.cpuAt){cpuJump(-380); d.willDbl=false; d.jumped=true;}
+  // whoever gets a hand to it first tips it to himself
+  const ph=!p.ground?{x:p.x+20,y:p.y-84}:null, ch=!d.ground?{x:d.x-20,y:d.y-84}:null;
+  const pt=ph && Math.hypot(ball.x-ph.x,ball.y-ph.y)<22, ct=ch && Math.hypot(ball.x-ch.x,ball.y-ch.y)<22;
+  if(pt||ct){
+    const w=(pt&&ct)?(ph.y<ch.y?p:(ch.y<ph.y?d:(Math.random()<0.5?p:d))):(pt?p:d);
+    endTip(w); return;
+  }
+  if(ball.vy>0 && ball.y>FLOOR-70) endTip(null);   // nobody touched it
+}
+function endTip(w){
+  tip.on=false; tip.fade=0.6;
+  if(w){
+    play("smack"); takeBall(w);
+    say((w===p?NAME.p:NAME.d)+" wins the tip!", w===p?"Your ball, go score on the right hoop":"Get in front of him: JUMP to block, or STEAL", w===p?C.info:C.warn);
+  } else {
+    ball.state="free"; ball.vx=(Math.random()-0.5)*80; ball.vy=0; ball.timer=0.2; ball.live=false;
+    say("Nobody got it!","Loose ball, go and grab it",C.warn);
+  }
+}
+function drawRef(){
+  if(!(tip.on||tip.fade>0)) return;
+  ctx.save(); ctx.globalAlpha=tip.on?1:Math.max(0,tip.fade/0.6);
+  const holding=tip.on && !tip.tossed, rx=TIP_X-(tip.on?0:(0.6-tip.fade)*90);   // walks off after the tip
+  const hand=holding?{x:0,y:-62+0}:{x:2,y:-90}, other={x:7,y:-62};   // other hand at the whistle
+  ctx.translate(0,-4); ctx.globalAlpha*=0.95;
+  drawAthlete({x:rx,y:FLOOR,lean:0,spd:tip.on?0:60,run:performance.now()/90},REF_LOOK,hand,other,false,false);
+  ctx.restore();
+}
 function takeBall(e){
   owner=e; ball.state="held"; ball.live=false;
   if(e===d){setCpuPlan(); d.lean=0; say(NAME.d+"'s ball!","Get in front of him: JUMP to block, or STEAL",C.warn);}
   else {say("Your ball!","Go score on the right hoop",C.info);}
+}
+
+// ---------- sound: everything is made on the fly with the Web Audio API, no sound files ----------
+const SND={ctx:null,on:true,master:null,noise:null,last:{}};
+function audioInit(){   // phones only allow sound after the first tap, so this runs on every tap/key
+  try{
+    if(SND.ctx){ if(SND.ctx.state==="suspended") SND.ctx.resume(); return; }
+    const AC=window.AudioContext||window.webkitAudioContext; if(!AC) return;
+    SND.ctx=new AC(); SND.master=SND.ctx.createGain(); SND.master.gain.value=0.55; SND.master.connect(SND.ctx.destination);
+    const n=SND.ctx.sampleRate, buf=SND.ctx.createBuffer(1,n,n), d=buf.getChannelData(0);
+    for(let i=0;i<n;i++) d[i]=Math.random()*2-1;
+    SND.noise=buf;
+  }catch(_){}
+}
+// a single tone with a quick attack and a fall-off; f2 slides the pitch
+function tone(f,dur,o){
+  o=o||{}; const c=SND.ctx, t=c.currentTime+(o.at||0), osc=c.createOscillator(), g=c.createGain();
+  osc.type=o.type||"sine"; osc.frequency.setValueAtTime(f,t);
+  if(o.f2) osc.frequency.exponentialRampToValueAtTime(o.f2,t+dur);
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(o.vol||0.3,t+(o.atk||0.005));
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  osc.connect(g); g.connect(o.dest||SND.master); osc.start(t); osc.stop(t+dur+0.05);
+  return {osc,g,t};
+}
+// a burst of filtered noise; f2 sweeps the filter
+function hiss(dur,o){
+  o=o||{}; const c=SND.ctx, t=c.currentTime+(o.at||0), src=c.createBufferSource(), fl=c.createBiquadFilter(), g=c.createGain();
+  src.buffer=SND.noise; src.loop=true;
+  fl.type=o.filter||"bandpass"; fl.frequency.setValueAtTime(o.f||1000,t); fl.Q.value=o.q||1;
+  if(o.f2) fl.frequency.exponentialRampToValueAtTime(o.f2,t+dur);
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(o.vol||0.3,t+(o.atk||0.005));
+  if(o.hold) g.gain.setValueAtTime(o.vol||0.3,t+o.hold);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  src.connect(fl); fl.connect(g); g.connect(o.dest||SND.master); src.start(t,Math.random()*0.5); src.stop(t+dur+0.05);
+  return {src,fl,g,t};
+}
+const SFX={
+  whistle(long){   // a referee's pea whistle: high note that warbles fast
+    const dur=long?0.95:0.45, r=tone(2900,dur,{vol:0.22,atk:0.02,type:"sine"});
+    const lfo=SND.ctx.createOscillator(), lg=SND.ctx.createGain(); lfo.frequency.value=32; lg.gain.value=170;
+    lfo.connect(lg); lg.connect(r.osc.frequency); lfo.start(r.t); lfo.stop(r.t+dur+0.05);
+    if(long) r.g.gain.setValueAtTime(0.22,r.t+dur-0.12);
+    hiss(dur,{f:3200,q:4,vol:0.05,atk:0.02});
+  },
+  dribble(){ tone(130,0.09,{f2:60,vol:0.22}); hiss(0.03,{filter:"lowpass",f:500,vol:0.08}); },
+  bounce(v){ const k=Math.min(1,v/700); if(k<0.08) return; tone(120,0.12,{f2:55,vol:0.3*k+0.03}); hiss(0.04,{filter:"lowpass",f:600,vol:0.12*k}); },
+  rim(v){ const k=Math.min(1,(v||400)/600)*0.8+0.2;   // a metal clank: a few out-of-tune ringing notes
+    for(const [f,a] of [[523,1],[1187,0.7],[1874,0.5],[2593,0.35]]) tone(f*(0.98+Math.random()*0.04),0.45,{vol:0.09*a*k});
+    hiss(0.03,{f:3000,q:0.7,vol:0.12*k}); },
+  board(v){ const k=Math.min(1,(v||400)/600)*0.8+0.2; tone(190,0.14,{f2:110,vol:0.28*k}); hiss(0.06,{f:900,q:1,vol:0.12*k}); },
+  swish(){ hiss(0.38,{f:6500,f2:2200,q:0.9,vol:0.22,atk:0.03}); },
+  cheer(size){ size=size||1;   // a crowd: noise shaped like voices, swelling up and dying away
+    const dur=1.2+size*0.9;
+    for(const [f,v] of [[520,0.12],[1150,0.1],[2300,0.06]]){
+      const h=hiss(dur,{f,q:0.8,vol:v*size,atk:0.25,hold:dur*0.45});
+      const lfo=SND.ctx.createOscillator(), lg=SND.ctx.createGain(); lfo.frequency.value=6+Math.random()*4; lg.gain.value=v*size*0.4;
+      lfo.connect(lg); lg.connect(h.g.gain); lfo.start(h.t); lfo.stop(h.t+dur);
+    }
+  },
+  groan(){ hiss(0.9,{f:420,f2:300,q:1.2,vol:0.09,atk:0.12}); },
+  thunder(){   // a sharp crack, then a long low rumble
+    hiss(0.12,{filter:"highpass",f:1800,vol:0.35,atk:0.002});
+    const r=hiss(1.8,{filter:"lowpass",f:160,q:0.7,vol:0.55,atk:0.04,hold:0.3});
+    const lfo=SND.ctx.createOscillator(), lg=SND.ctx.createGain(); lfo.frequency.value=9; lg.gain.value=0.18;
+    lfo.connect(lg); lg.connect(r.g.gain); lfo.start(r.t); lfo.stop(r.t+1.8);
+  },
+  glass(big){   // shattering glass: a crash plus lots of little tinkles
+    hiss(big?0.35:0.18,{filter:"highpass",f:2500,vol:big?0.35:0.2,atk:0.002});
+    const n=big?34:12;
+    for(let i=0;i<n;i++) tone(2800+Math.random()*4500,0.05+Math.random()*0.14,{vol:0.05+Math.random()*0.05,at:Math.random()*(big?0.7:0.35)});
+  },
+  crack(){ for(let i=0;i<7;i++) hiss(0.025,{filter:"highpass",f:2200,vol:0.18,at:i*0.02+Math.random()*0.01}); tone(1600,0.06,{vol:0.06}); },
+  slam(){ SFX.rim(900); tone(95,0.25,{f2:45,vol:0.45}); hiss(0.08,{filter:"lowpass",f:800,vol:0.25}); },
+  smack(){ hiss(0.06,{f:1300,q:1,vol:0.3}); tone(300,0.06,{f2:180,vol:0.22}); },
+  swipe(){ hiss(0.16,{f:700,f2:2600,q:1.4,vol:0.16,atk:0.02}); },
+  squeak(){ tone(2300,0.11,{f2:3100,vol:0.07,type:"triangle"}); },
+  tick(){ tone(1500,0.06,{vol:0.13}); tone(2250,0.05,{vol:0.07,at:0.01}); },
+  click(){ tone(900,0.03,{vol:0.12}); }
+};
+function play(name,arg){
+  if(!SND.on||!SND.ctx||SND.ctx.state!=="running") return;
+  const now=performance.now(); if(now-(SND.last[name]||0)<45) return;   // the same sound can't stack up in one moment
+  SND.last[name]=now;
+  try{ SFX[name](arg); }catch(_){}
 }
 
 // ---------- dunk effects: thunder, breaking glass, and a cracked screen for a windmill ----------
@@ -221,6 +358,7 @@ function startBoardFx(side,wind){
     rot:Math.random()*6.28, vr:(Math.random()-0.5)*14, s:2+Math.random()*(wind?6:3.5)});
   const T=wind?2.6:1.6;
   boardFx={t:T,T,side,shatter:wind,shards,bolts:makeBolts(side),flash:0.32,boltT:wind?0.7:0.5};
+  play("thunder"); play("glass",wind);
   shakeT=Math.max(shakeT,wind?0.6:0.4);
 }
 // the phone screen cracks: a small smash in the middle, cracks creep out slowly and speed up,
@@ -239,6 +377,7 @@ function startCrackFx(){
     const base=Math.atan2(y0-cy,x0-cx), a=base+(Math.random()<0.5?-1:1)*(0.5+Math.random()*0.7), len=50+Math.random()*170;
     branches.push(jagged(x0,y0,x0+Math.cos(a)*len,y0+Math.sin(a)*len,6,14));}
   crackFx={t:CRACK_T,T:CRACK_T,lines,rings,branches,cx,cy,shook:false};
+  play("crack");
 }
 function crackReach(e){   // how far from the middle the cracks have spread, e seconds after the smash
   if(e<CRACK_SMASH) return 22*Math.min(1,e/0.1);
@@ -256,7 +395,7 @@ function updateFx(dt){
   }
   if(crackFx.t>0){
     crackFx.t-=dt;
-    if(!crackFx.shook && crackFx.T-crackFx.t>=CRACK_ALL){crackFx.shook=true; shakeT=Math.max(shakeT,0.3);}
+    if(!crackFx.shook && crackFx.T-crackFx.t>=CRACK_ALL){crackFx.shook=true; shakeT=Math.max(shakeT,0.3); SND.last.glass=0; play("glass",true);}
   }
 
 }
@@ -308,10 +447,14 @@ function drawScreenFx(){
 function windmillHand(dk,e,dir,rim){
   const sx=e.x+dir*6, sy=e.y-47, L=34;
   if(dk.t<RISE){
-    const u=Math.min(1,Math.max(0,(dk.t-dk.w0)/Math.max(0.08,RISE-dk.w0))), th=-Math.PI/2-Math.PI*u;
+    // under and over: the ball drops down by the hip, then swings back behind and up over the top
+    const u=Math.min(1,Math.max(0,(dk.t-dk.w0)/Math.max(0.08,RISE-dk.w0)));
+    const down={x:sx, y:sy+L};
+    if(u<0.22){const k=u/0.22, from={x:e.x+dir*10,y:e.y-96}; return {x:from.x+(down.x-from.x)*k, y:from.y+(down.y-from.y)*k};}
+    const th=Math.PI/2+Math.PI*((u-0.22)/0.78);   // down -> behind -> straight up
     return {x:sx+dir*Math.cos(th)*L, y:sy+Math.sin(th)*L};
   }
-  const u=Math.min(1,(dk.t-RISE)/SLAM), th=Math.PI/2-Math.PI*0.9*u, k=u*u;
+  const u=Math.min(1,(dk.t-RISE)/SLAM), th=-Math.PI/2+Math.PI*0.45*u, k=u*u;   // from up, forward and down into the rim
   const arm={x:sx+dir*Math.cos(th)*L, y:sy+Math.sin(th)*L};
   return {x:arm.x+(rim.x-arm.x)*k, y:arm.y+(rim.y-6-arm.y)*k};
 }
@@ -327,13 +470,14 @@ function trySteal(joy,joyY){
   // he can only lose it while dribbling, not once the ball is up for a shot
   const chance = (cpu.charging||!d.ground) ? 0 : SKILL.stealChance;
   if(Math.random()<chance){
+    play("swipe"); play("squeak"); play("cheer",0.8);
     stats.stl++; owner=p; ball.state="held"; ball.live=false; needRelease=true;
     cpu.charging=false; charge.on=false;
     say(pick("steal"),"You stole it from "+NAME.d+"!",C.info);
     setMood(p,"happy"); setMood(d,"shock"); celebrateFor(p);
     lastShot="Steal by "+NAME.p;
   } else {
-    stealMsg={text:pick("stealMiss"),t:1};
+    play("swipe"); stealMsg={text:pick("stealMiss"),t:1};
   }
 }
 
@@ -397,10 +541,10 @@ function hitPoint(px,py,r,e){
 function collideHoops(){
   let hit=null;
   for(const h of HOOPS){
-    for(const [px,py] of h.edges) if(hitPoint(px,py,2.5,BOUNCE.rim)){hit="rim"; netKick(h.net,1.5,0);}
+    for(const [px,py] of h.edges) if(hitPoint(px,py,2.5,BOUNCE.rim)){hit="rim"; netKick(h.net,1.5,0); play("rim",Math.hypot(ball.vx,ball.vy)/BOUNCE.rim);}
     if(ball.y>h.top && ball.y<h.bot){   // the glass
-      if(h.faceDir<0 && ball.x+BALL_R>h.face && ball.x<h.face+7 && ball.vx>0){ball.x=h.face-BALL_R; ball.vx=-ball.vx*BOUNCE.board; ball.vy*=0.92; hit=hit||"board";}
-      if(h.faceDir>0 && ball.x-BALL_R<h.face && ball.x>h.face-7 && ball.vx<0){ball.x=h.face+BALL_R; ball.vx=-ball.vx*BOUNCE.board; ball.vy*=0.92; hit=hit||"board";}
+      if(h.faceDir<0 && ball.x+BALL_R>h.face && ball.x<h.face+7 && ball.vx>0){ball.x=h.face-BALL_R; ball.vx=-ball.vx*BOUNCE.board; ball.vy*=0.92; hit=hit||"board"; play("board",Math.abs(ball.vx)/BOUNCE.board);}
+      if(h.faceDir>0 && ball.x-BALL_R<h.face && ball.x>h.face-7 && ball.vx<0){ball.x=h.face+BALL_R; ball.vx=-ball.vx*BOUNCE.board; ball.vy*=0.92; hit=hit||"board"; play("board",Math.abs(ball.vx)/BOUNCE.board);}
     }
     for(const cy of [h.top,h.bot]) if(hitPoint(h.face-h.faceDir*3.5,cy,3.5,BOUNCE.board)) hit=hit||"board";
     const fx=h.edges[0][0];   // the net hangs from the front of the rim, slanting in, and soaks up most of the speed
@@ -411,7 +555,7 @@ function collideHoops(){
 function floorAndWalls(){
   if(ball.y>FLOOR-BALL_R){
     ball.y=FLOOR-BALL_R;
-    if(ball.vy>0){ball.vy=-ball.vy*BOUNCE.floor; ball.vx*=0.9;}
+    if(ball.vy>0){play("bounce",ball.vy); ball.vy=-ball.vy*BOUNCE.floor; ball.vx*=0.9;}
     if(Math.abs(ball.vy)<35) ball.vy=0;
   }
   if(ball.x<8){ball.x=8; ball.vx=Math.abs(ball.vx)*0.6;}
@@ -446,8 +590,8 @@ function update(dt){
   }
   if(dunk.on) updateDunk(dt);
   else {
-    p.x=clamp(p.x+joy*(charge.on?70:170)*dt,24,812);
-    if(jumpQueued && p.ground){p.vy=-380;p.ground=false;p.dbl=false;}
+    if(!tip.on) p.x=clamp(p.x+joy*(charge.on?70:170)*dt,24,812);
+    if(jumpQueued && p.ground){p.vy=-380;p.ground=false;p.dbl=false; play("squeak");}
     else if(jumpQueued && !p.ground && !p.dbl && playerDefending()){
       // double jump: only works if the second tap lands near the top of the first jump
       if(apexWindow()){p.vy=-380; p.dbl=true; dblFx={t:0.45,x:p.x,y:p.y};}
@@ -464,7 +608,8 @@ function update(dt){
     if(shootDown && !charge.on && !needRelease && p.ground && inKey(p.x)) startDunk();
     else if(shootDown && !charge.on && !needRelease) startCharge();
     if(charge.on){
-      charge.power+=dt/FILL*100; charge.holdT+=dt;
+      const before=charge.power; charge.power+=dt/FILL*100; charge.holdT+=dt;
+      {const z=zoneFor(p.x,RR), lo=(charge.fade?z.f:z.n)[0]; if(before<lo && charge.power>=lo) play("tick");}
       charge.fade=joy<-0.35; charge.zone=zoneFor(p.x,RR);
       if(!shootDown) release(false);
       else if(charge.power>=100){charge.power=100;release(true);}
@@ -549,7 +694,7 @@ function update(dt){
     ball.vy+=GB*dt; ball.y+=ball.vy*dt;
     if(ball.y>FLOOR-8){ball.y=FLOOR-8; ball.vy*=-0.55; if(Math.abs(ball.vy)<40) ball.vy=0;}
   }
-  updateNets(dt); updateFx(dt);
+  updateNets(dt); updateFx(dt); if(tip.fade>0) tip.fade-=dt;
   if(msg.t>0) msg.t-=dt;
   if(celebrate.t>0) celebrate.t-=dt;
   if(dblFx.t>0) dblFx.t-=dt;
@@ -629,6 +774,7 @@ function setCpuPlan(){
   cpu.spot=cpu.dunk ? 115+Math.random()*40 : pickSpot();
 }
 function blocked(by,save){
+  play("smack");
   const shooterDir = ball.shooter===p ? 1 : -1;
   ball.state="free"; ball.timer=0; ball.live=false;
   if(save){ball.vx=-shooterDir*(140+Math.random()*70); ball.vy=-90;}   // swatted away from the hoop
@@ -648,6 +794,8 @@ function arrive(t){
   if(ball.make){
     ball.state="made"; ball.x=rim.x; ball.y=rim.y; ball.timer=0;
     netKick(byP?1:0, ball.dunk?9:3, ball.dunk?(byP?2:-2):0); // swish, or a hard yank on a dunk
+    if(ball.dunk) play("slam"); else play("swish");
+    play("cheer", ball.wind?1.6:(ball.dunk?1.3:(ball.far?1.5:(ball.pts===3?1.1:0.7))));
     if(byP){
       stats.score+=ball.pts; stats.made++; if(ball.pts===3) stats.threes++; if(ball.dunk) stats.dunks++; stats.streak++; stats.best=Math.max(stats.best,stats.streak);
       const cat=ball.lucky?"lucky":ball.wind?"windmill":(ball.dunk?"dunk":(ball.far?"half":(ball.fade?"fade":(stats.streak>=3?"fire":(ball.pts===3?"three":"two")))));
@@ -664,7 +812,7 @@ function arrive(t){
     if(cpuOn && (stats.score>=WIN||stats.cpu>=WIN)){
       const youWin=stats.score>=WIN;
       say((youWin?NAME.p:NAME.d).toUpperCase()+" WINS!", stats.score+" – "+stats.cpu, youWin?C.green:C.warn);
-      msg.t=3; gameOverT=3;
+      msg.t=3; gameOverT=3; SND.last.whistle=0; play("whistle",true);
       setMood(youWin?p:d,"happy",3); setMood(youWin?d:p,"grump",3); celebrateFor(youWin?p:d,3);
     }
     pendingInbound = cpuOn ? (byP?"d":"p") : "p"; inboundT=1.1;
@@ -679,7 +827,7 @@ function missNow(){
     if(byP){
       stats.streak=0;
       const tip={auto:"Let go before the bar is full",air:"Way too early, hold a bit longer",short:"A little early, hold longer",long:"A little late, let go sooner"}[ball.missType];
-      say(pick(ball.missType), tip+(cpuOn?" · grab the rebound!":""), C.warn);
+      say(pick(ball.missType), tip+(cpuOn?" · grab the rebound!":""), C.warn); play("groan");
       setMood(p,"grump");
     } else {
       say(pick(ball.missType),NAME.d+" missed! Grab the rebound!",C.info);
@@ -691,6 +839,7 @@ function missNow(){
 // a defender jump; about 1 in 3 of them turns into a double jump at the top
 function cpuJump(v){d.vy=v; d.ground=false; d.dbl=false; d.willDbl=Math.random()<SKILL.dblChance;}
 function cpuUpdate(dt){
+  if(tip.on){ updateTip(dt); body(d,dt); return; }
   if(cdunk.on){ runDunk(cdunk,d,-1,RL,CPU_DUNK_X,dt); return; }
   if(owner===d && ball.state==="held"){
     // attacking the left hoop
@@ -1037,9 +1186,10 @@ function loadSave(){
     if(BOYS[s.human]) human=s.human;
     if(s.wins) wins=Object.assign({zackie:0,keelan:0},s.wins);
     if(s.progress) progress=Object.assign({zackie:0,keelan:0},s.progress);
+    if(s.sound===false) SND.on=false;
   }catch(_){}
 }
-function saveGame(){try{localStorage.setItem(SAVE_KEY,JSON.stringify({kits,human,wins,progress}));}catch(_){}}
+function saveGame(){try{localStorage.setItem(SAVE_KEY,JSON.stringify({kits,human,wins,progress,sound:SND.on}));}catch(_){}}
 
 // ---------- screens: title, setup, play, pause, game over ----------
 let screen="title", mode="vs", overWinner="p", ui=[];
@@ -1054,9 +1204,9 @@ function startGame(){
   moods.p.m=moods.d.m="happy"; moods.p.t=moods.d.t=0;
   touchJoy=0; shootTouch=false; shootKey=false; needRelease=true;
   lastShot="Hold SHOOT, let go in the green zone";
-  inbound("p"); screen="play";
-  if(mode==="level") say(levelName(level),"at "+ARENAS[Math.floor(level/STOPS)].name+" · first to "+WIN,C.ink);
-  else if(cpuOn) say(NAME.p+" vs "+NAME.d,"First to "+WIN+" wins",C.ink);
+  inbound("p"); screen="play"; tip.on=false; tip.fade=0;
+  if(cpuOn) startTip();
+  else if(mode==="level") say(levelName(level),"at "+ARENAS[Math.floor(level/STOPS)].name+" · first to "+WIN,C.ink);
   else say("Shooting practice",NAME.p+", shoot as much as you like",C.ink);
 }
 function endGame(){
@@ -1307,6 +1457,7 @@ function drawTitle(){
   const at=b=>progress[b]>=LEVELS?"done!":"L"+(Math.floor(progress[b]/STOPS)+1)+" · P"+(progress[b]%STOPS+1);
   text("WHERE EACH BOY IS UP TO",cx,326,BODY(11,900),C.muted,"center");
   text(BOYS.zackie.name+"  "+at("zackie")+"     "+BOYS.keelan.name+"  "+at("keelan"),cx,346,BODY(15,900),C.ink,"center");
+  button(cx-60,358,120,26,SND.on?"SOUND ON":"SOUND OFF",{size:12,outline:"rgba(255,255,255,0.3)"},toggleSound);
 }
 function swatch(cx,cy,r,col,sel,disabled,fn){
   ctx.globalAlpha=disabled?0.25:1;
@@ -1375,7 +1526,9 @@ function drawPause(){
   button(bx,134,300,50,"RESUME",{fill:"#2F6FE4"},()=>{screen="play"; needRelease=true;});
   button(bx,194,300,44,"RESTART",{outline:"rgba(255,255,255,0.3)"},()=>startGame());
   button(bx,248,300,44,"MAIN MENU",{outline:"rgba(255,255,255,0.3)"},toMap);
+  button(bx,302,300,40,SND.on?"SOUND: ON":"SOUND: OFF",{outline:"rgba(255,255,255,0.3)",size:15},toggleSound);
 }
+function toggleSound(){SND.on=!SND.on; saveGame(); if(SND.on){audioInit(); SND.last.click=0; play("click");}}
 function drawOver(){
   ui=[]; shade(0.84);
   const youWin=overWinner==="p", boy=youWin?human:other();
@@ -1449,6 +1602,7 @@ function drawAthlete(e,lk,hand,other,air,hang){
   ctx.moveTo(-8,-51); ctx.lineTo(-4.5,-51); ctx.lineTo(0,-46); ctx.lineTo(4.5,-51); ctx.lineTo(8,-51);
   ctx.quadraticCurveTo(10,-44,12,-42); ctx.lineTo(11,-30); ctx.lineTo(-11,-30); ctx.lineTo(-12,-42);
   ctx.quadraticCurveTo(-10,-44,-8,-51); ctx.closePath(); ctx.fill();
+  if(lk.stripes){ctx.save(); ctx.clip(); ctx.fillStyle="#22232B"; for(let x=-12;x<13;x+=6) ctx.fillRect(x,-52,3,23); ctx.restore();}
   ctx.strokeStyle=lk.trim; ctx.lineWidth=1.4; ctx.beginPath();
   ctx.moveTo(-4.5,-51); ctx.lineTo(0,-46); ctx.lineTo(4.5,-51);
   ctx.moveTo(8,-51); ctx.quadraticCurveTo(10,-44,12,-42); ctx.moveTo(-8,-51); ctx.quadraticCurveTo(-10,-44,-12,-42); ctx.stroke();
@@ -1547,7 +1701,8 @@ function faceBadge(lk,cx,cy,r,bg){
 function drawPlayer(){
   shadow(p);
   let hx=12, hy=-26, ox=-12, oy=-24;
-  if(stealSwipe>0 && owner!==p){hx=(Math.sign(d.x-p.x)||1)*26; hy=-24;}
+  if(tip.on && !p.ground){hx=20; hy=-84;}
+  else if(stealSwipe>0 && owner!==p){hx=(Math.sign(d.x-p.x)||1)*26; hy=-24;}
   else if(dunk.on && dunk.wind && !dunk.resolved){hx=ball.x-p.x; hy=ball.y-p.y; ox=-14; oy=-64;}
   else if(dunk.on){
     if(dunk.t<RISE){hx=10;hy=-96;ox=-16;oy=-66;}
@@ -1566,7 +1721,8 @@ function drawCpu(){
   if(!cpuOn) return;
   shadow(d);
   let hx=-16, hy=-24, ox=16, oy=-24;
-  if(cdunk.on && cdunk.wind && !cdunk.resolved){hx=ball.x-d.x; hy=ball.y-d.y; ox=14; oy=-64;}
+  if(tip.on && !d.ground){hx=-20; hy=-84;}
+  else if(cdunk.on && cdunk.wind && !cdunk.resolved){hx=ball.x-d.x; hy=ball.y-d.y; ox=14; oy=-64;}
   else if(cdunk.on){
     if(cdunk.t<RISE){hx=-10;hy=-96;ox=16;oy=-66;}
     else if(cdunk.t<RISE+SLAM+cdunk.hang || !cdunk.resolved){hx=-12;hy=-86;ox=14;oy=-64;}
@@ -1634,7 +1790,9 @@ function drawBallAt(x,y,R,def,rot){
 }
 // dribbling: the ball bounces between the hand and the floor beside the player
 function dribblePos(e,dir,dt){
+  const before=Math.floor((e.drib||0)/Math.PI+0.5);
   e.drib=(e.drib||0)+dt*(7+Math.min(6,Math.abs(e.spd||0)*0.03));
+  if(Math.floor(e.drib/Math.PI+0.5)!==before) play("dribble");
   const u=Math.abs(Math.cos(e.drib)), top=e.y-42, low=FLOOR-8;
   return {x:e.x+dir*15, y:low+(top-low)*u};
 }
@@ -1681,7 +1839,10 @@ function drawHUD(){
   if(cpuOn) pill(238,166,LOOK.d,C.p2,NAME.d,stats.cpu);
   const px=cpuOn?412:238, pw=W-16-px, cx=px+pw/2;
   ctx.fillStyle="rgba(46,56,102,0.95)"; rr(px,14,pw,40,12); ctx.fill();
-  if(cpuOn && playerDefending()){
+  if(tip.on){
+    text("JUMP BALL",cx,26,BODY(11,900),C.warn,"center");
+    text("Tap JUMP as the ball comes down. Highest hand wins it",cx,42,BODY(13,900),C.ink,"center");
+  } else if(cpuOn && playerDefending()){
     text("DEFENSE · FIRST TO "+WIN,cx,26,BODY(11,900),C.warn,"center");
     text("JUMP to block · joystick down towards him + STEAL to steal",cx,42,BODY(12,900),C.ink,"center");
   } else if(cpuOn && owner!==p && ball.state==="free"){
@@ -1795,7 +1956,7 @@ function drawMsg(){
 function drawGame(){
   ctx.save();
   if(shakeT>0){ctx.translate((Math.random()-0.5)*7,(Math.random()-0.5)*7);}
-  drawCourt(); drawNetLayer(false); drawCpu();
+  drawCourt(); drawNetLayer(false); drawRef(); drawCpu();
   for(const fx of [dblFx,cpuFx]) if(fx.t>0){ // burst rings under the feet where a double jump kicked off
     const u=1-fx.t/0.45;
     ctx.globalAlpha=1-u; ctx.strokeStyle=C.green; ctx.lineWidth=3;
@@ -1834,10 +1995,11 @@ function draw(){
 const roles=new Map();
 function toLocal(e){const r=cv.getBoundingClientRect();return {x:(e.clientX-r.left)/r.width*W,y:(e.clientY-r.top)/r.height*H};}
 cv.addEventListener("pointerdown",e=>{
+  audioInit();
   const q=toLocal(e); let role=null;
   if(screen!=="play"){
     for(let i=ui.length-1;i>=0;i--){const u=ui[i];
-      if(q.x>=u.x&&q.x<=u.x+u.w&&q.y>=u.y&&q.y<=u.y+u.h){u.fn(); e.preventDefault(); return;}}
+      if(q.x>=u.x&&q.x<=u.x+u.w&&q.y>=u.y&&q.y<=u.y+u.h){play("click"); u.fn(); e.preventDefault(); return;}}
     if(screen==="title" && inMap(q)){
       mapDrag={id:e.pointerId,y0:q.y,s0:mapScroll,moved:false};
       try{cv.setPointerCapture(e.pointerId);}catch(_){}
@@ -1884,7 +2046,7 @@ cv.addEventListener("keydown",e=>{
     else if(screen==="over") startGame(); else if(screen==="pause") screen="play";
     return;
   }
-  keys.add(k); keyJoyUpdate();
+  audioInit(); keys.add(k); keyJoyUpdate();
   if(k==="ArrowUp"||k==="w") jumpQueued=true;
   if(k===" "||k==="k") shootKey=true;
 });
