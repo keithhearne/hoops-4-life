@@ -1284,6 +1284,7 @@ function loadSave(){
     if(BOYS[s.human]) human=s.human;
     if(s.wins) wins=Object.assign({zackie:0,keelan:0},s.wins);
     if(s.progress) progress=Object.assign({zackie:0,keelan:0},s.progress);
+    if(Array.isArray(s.owned)) owned=Array.from(new Set(["zackie","keelan",...s.owned]));
     for(const b of ["zackie","keelan"]){
       if(s.medals&&Array.isArray(s.medals[b])) medals[b]=s.medals[b]; if(s.crowns&&Array.isArray(s.crowns[b])) crowns[b]=s.crowns[b];
       // older saves: give the medals and crowns for every game already beaten
@@ -1292,7 +1293,7 @@ function loadSave(){
     if(s.sound===false) SND.on=false;
   }catch(_){}
 }
-function saveGame(){try{localStorage.setItem(SAVE_KEY,JSON.stringify({kits,human,wins,progress,medals,crowns,sound:SND.on}));}catch(_){}}
+function saveGame(){try{localStorage.setItem(SAVE_KEY,JSON.stringify({kits,human,wins,progress,medals,crowns,owned,sound:SND.on}));}catch(_){}}
 
 // ---------- screens: title, setup, play, pause, game over ----------
 let screen="title", mode="vs", overWinner="p", ui=[];
@@ -1407,6 +1408,7 @@ function mapMaxScroll(){return Math.max(0,mapContentH()-VIEW.h);}
 // ---------- levels: every stop is a 1 v 1 game, each one a bit harder than the last ----------
 const LEVELS=ROADS.length*STOPS;
 let progress={zackie:0,keelan:0}, level=0, newRoad=false, newAward=null;
+let owned=["zackie","keelan"];   // players that can be picked; bosses join this list later from Trophies, Rewards and Chests
 let medals={zackie:[],keelan:[]}, crowns={zackie:[],keelan:[]};   // the games each boy has won: a medal for each game, a crown for each boss   // progress = how many levels that boy has beaten
 function levelName(n){return "Level "+(Math.floor(n/STOPS)+1)+" · Game "+(n%STOPS+1);}
 function levelTarget(n){return 21;}   // every game is first to 21
@@ -1774,7 +1776,7 @@ function drawMedal(x,y,r){   // a gold medal on a ribbon
 }
 // the middle of the menu ("prizes"): how many medals and boss crowns the selected boy has won
 function drawPrizes(boy,cx,y){
-  const w=176, x=cx-w/2, h=208, col=MAINS[kits[boy].main];
+  const w=176, x=cx-w/2, h=200, col=MAINS[kits[boy].main];
   ctx.fillStyle="rgba(16,21,43,0.92)"; rr(x,y,w,h,18); ctx.fill();
   ctx.strokeStyle=col; ctx.lineWidth=3; ctx.stroke();
   text(BOYS[boy].name.toUpperCase()+"'S PRIZES",cx,y+20,BODY(12,900),C.muted,"center");
@@ -1784,7 +1786,46 @@ function drawPrizes(boy,cx,y){
   ctx.strokeStyle="rgba(255,255,255,0.12)"; ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(x+16,y+112); ctx.lineTo(x+w-16,y+112); ctx.stroke();
   drawCrown(x+44,y+160,20);
   text(String(nCrown),x+76,y+142,DISP(30),C.ink); text("CROWNS · of "+maxCrown,x+77,y+168,BODY(10,900),C.muted);
-  text(nCrown?"Last boss: "+BOSSES[Math.floor(Math.max(...crowns[boy])/STOPS)].name:"Beat a boss to win his crown",cx,y+192,BODY(10,800),nCrown?C.warn:C.muted,"center");
+  text(nCrown?"Last boss: "+BOSSES[Math.floor(Math.max(...crowns[boy])/STOPS)].name:"Beat a boss to win his crown",cx,y+187,BODY(10,800),nCrown?C.warn:C.muted,"center");
+}
+// the Players screen: Zackie and Keelan, then all 30 bosses (greyed out until they're won)
+let playersMsg={text:"",t:0};
+function drawPlayers(){
+  ui=[]; drawCourt(); shade(0.85);
+  bigTitle("PLAYERS",W/2,30,28);
+  text("Tap Zackie or Keelan to play as him. Bosses unlock later from Trophies, Rewards and Chests.",W/2,56,BODY(12,800),C.muted,"center");
+  const list=["zackie","keelan",...BOSSES.map((_,i)=>"boss"+i)];
+  const cols=8, cw=99, ch=66, x0=(W-cols*cw)/2, y0=72;
+  list.forEach((id,k)=>{
+    const c=k%cols, r=Math.floor(k/cols), x=x0+c*cw+3, y=y0+r*ch+3, w=cw-6, h=ch-6;
+    const isBoy=!id.startsWith("boss"), i=isBoy?-1:+id.slice(4), open=owned.includes(id), sel=isBoy&&id===human;
+    const lk=isBoy?kitLook(BOYS[id],kits[id],1):Object.assign(bossLook(i),{dir:1});
+    const name=isBoy?BOYS[id].name:BOSSES[i].name, col=isBoy?MAINS[kits[id].main]:lk.jersey;
+    ctx.fillStyle=sel?"rgba(46,56,102,0.98)":"rgba(27,35,64,0.95)"; rr(x,y,w,h,12); ctx.fill();
+    ctx.strokeStyle=sel?C.warn:(open?"rgba(255,255,255,0.3)":"rgba(255,255,255,0.08)"); ctx.lineWidth=sel?3:1.5; ctx.stroke();
+    ctx.save();
+    if(!open){ctx.filter="grayscale(1)"; ctx.globalAlpha=0.4;}
+    faceBadge(lk,x+21,y+h/2,17,col);
+    ctx.restore();
+    const words=name.split(" "), two=words.length>1 && (ctx.font=BODY(11,900), ctx.measureText(name).width>w-46);
+    const lines=two?[words.slice(0,-1).join(" "),words[words.length-1]]:[name];
+    lines.forEach((ln,j)=>{let fs=11; ctx.font=BODY(fs,900); while(fs>8 && ctx.measureText(ln).width>w-46){fs--; ctx.font=BODY(fs,900);}
+      text(ln,x+42,y+h/2-(two?13:7)+j*12,BODY(fs,900),open?C.ink:"rgba(255,255,255,0.6)");});
+    text(isBoy?(sel?"PLAYING":"#"+BOYS[id].num):"L"+(i+1)+" BOSS",x+42,y+h/2+(two?14:9),BODY(9,900),sel?C.warn:"rgba(255,255,255,0.45)");
+    if(!open){ctx.fillStyle=C.navy; ctx.beginPath(); ctx.arc(x+w-11,y+11,8,0,Math.PI*2); ctx.fill(); padlock(x+w-11,y+12,C.muted);}
+    ui.push({x,y,w,h,fn:()=>{
+      if(isBoy){human=id; mapScroll=null; saveGame(); playersMsg={text:"Playing as "+name,t:1.5};}
+      else if(open) playersMsg={text:name+" is unlocked",t:1.5};
+      else playersMsg={text:name+" unlocks later from Trophies, Rewards and Chests",t:2};
+    }});
+  });
+  button(16,344,130,36,"BACK",{},()=>{screen="title";});
+  if(playersMsg.t>0){
+    playersMsg.t-=1/60; ctx.globalAlpha=Math.min(1,playersMsg.t*3);
+    ctx.font=BODY(13,900); const w=ctx.measureText(playersMsg.text).width+28;
+    ctx.fillStyle="rgba(10,14,30,0.95)"; rr(W/2-w/2,346,w,30,12); ctx.fill();
+    text(playersMsg.text,W/2,361,BODY(13,900),C.warn,"center"); ctx.globalAlpha=1;
+  }
 }
 function drawTitle(){
   ui=[]; drawCourt(); drawNetLayer(false); drawNetLayer(true); shade(0.72);
@@ -1793,7 +1834,8 @@ function drawTitle(){
   const bw=320, bx=W-16-bw, cx=bx+bw/2;
   let ts=40; ctx.font=DISP(ts); while(ts>22 && ctx.measureText("HOOPS 4 LIFE").width>bw){ts-=2; ctx.font=DISP(ts);}
   bigTitle("HOOPS 4 LIFE",cx,40,ts,"center");
-  drawPrizes(human,412,92);
+  button(324,92,176,40,"PLAYERS",{fill:"#7B4FD6",sub:owned.length+" of "+(2+BOSSES.length)+" unlocked"},()=>{screen="players";});
+  drawPrizes(human,412,140);
   text(BOYS.zackie.name+" vs "+BOYS.keelan.name,cx,74,BODY(15,900),C.ink,"center");
   button(bx,92,bw,50,"1 v 1 vs COMPUTER",{fill:"#2F6FE4",sub:BOYS[human].name+" · "+(progress[human]>=LEVELS?"all levels beaten!":levelName(progress[human]))},openNextLevel);
   button(bx,150,bw,50,"SHOOTING PRACTICE",{fill:"#F26B1D",ink:C.navy,sub:"No defender"},()=>openSetup("practice"));
@@ -2368,6 +2410,7 @@ function draw(){
   ctx.save();
   if(screen==="title") drawTitle();
   else if(screen==="setup") drawSetup();
+  else if(screen==="players") drawPlayers();
   else {
     drawGame();
     if(screen==="pause") drawPause();
