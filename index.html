@@ -147,7 +147,7 @@ let dblFx={t:0,x:0,y:0}, cpuFx={t:0,x:0,y:0}, dblMiss=0;
 function apexWindow(){return !p.ground && !p.dbl && !dunk.on && !charge.on && playerDefending() && Math.abs(p.vy)<APEX_VY;}
 // reaction faces: each player shows "happy", "shock" or "grump" for a moment after a play
 const moods={p:{m:"happy",t:0},d:{m:"happy",t:0}};
-function moodOf(lk){return (lk.dir>0?moods.p:moods.d).m;}
+function moodOf(lk){return (lk.who==="d"?moods.d:moods.p).m;}
 function setMood(e,m,t){const s=e===p?moods.p:moods.d; s.m=m; s.t=t||2.2;}
 // celebration pop-up with the manga portrait of whoever made the big play
 let celebrate={who:null,t:0,T:2.2};
@@ -192,8 +192,29 @@ function cpuDefending(){return owner===p || (ball.state==="flight"&&ball.shooter
 function playerDefending(){return owner===d || (ball.state==="flight"&&ball.shooter===d);}
 function cpuArmUp(){return cpuOn && cpuDefending() && (!d.ground || charge.on || dunk.on || ball.state==="flight");}
 function playerArmUp(){return playerDefending() && (!p.ground || cpu.charging || cdunk.on || ball.state==="flight");}
-function cpuHand(){return {x:d.x-20,y:d.y-84};}
-function playerHand(){return {x:p.x+20,y:p.y-84};}
+function cpuHand(){return {x:d.x+20*(d.face||-1),y:d.y-84};}
+function playerHand(){return {x:p.x+20*(p.face||1),y:p.y-84};}
+// Which way each player faces (1 = right, -1 = left).
+// Defending: face the ball handler, so from behind you turn and chase him, and once past him you face him.
+// With the ball: face the way you're going (always towards the hoop when shooting or dunking).
+// Loose ball: face the ball.
+p.face=1; d.face=-1;
+function updateFacing(joy){
+  const pDef = owner===d || (ball.state==="flight" && ball.shooter===d);
+  if(dunk.on || charge.on) p.face=1;
+  else if(tip.on) p.face=Math.sign(d.x-p.x)||1;
+  else if(owner===p) p.face = joy<-0.3?-1:(joy>0.3?1:p.face);
+  else if(cpuOn && pDef) p.face=Math.sign(d.x-p.x)||p.face;
+  else if(Math.abs(joy)>0.3) p.face=Math.sign(joy);
+  else if(ball.state==="free" && Math.abs(ball.x-p.x)>6) p.face=Math.sign(ball.x-p.x);
+  if(!cpuOn) return;
+  const dDef = owner===p || (ball.state==="flight" && ball.shooter===p);
+  if(cdunk.on || cpu.charging) d.face=-1;
+  else if(tip.on) d.face=Math.sign(p.x-d.x)||-1;
+  else if(owner===d) d.face = Math.abs((d.spd||0))>15 ? Math.sign(d.spd) : -1;
+  else if(dDef) d.face=Math.sign(p.x-d.x)||d.face;
+  else if(ball.state==="free" && Math.abs(ball.x-d.x)>6) d.face=Math.sign(ball.x-d.x);
+}
 
 function inbound(who){
   ball.state="held"; ball.live=false; charge.on=false; cpu.charging=false; d.jumped=false; d.react=null;
@@ -605,7 +626,10 @@ function update(dt){
       else {p.dbl=true; dblMiss=0.6;}
     }
     // jump shot hang time: while powering up in the air the player freezes, and drops after the release
-    if(charge.on && !p.ground){p.vy=0;}
+    if(charge.on && !p.ground){   // jump shot: keep rising normally, then float down slowly while the bar fills
+      p.vy = p.vy<0 ? p.vy+G*dt : Math.min(p.vy+G*0.15*dt, 55);
+      p.y+=p.vy*dt; if(p.y>=FLOOR){p.y=FLOOR; p.vy=0; p.ground=true;}
+    }
     else body(p,dt);
   }
   jumpQueued=false;
@@ -627,6 +651,7 @@ function update(dt){
 
   // computer
   if(cpuOn) cpuUpdate(dt);
+  updateFacing(joy);
 
   // ball
   if(ball.state==="held"){
@@ -642,7 +667,7 @@ function update(dt){
       if(cdunk.t<RISE) h=a;
       else {const u=Math.min(1,(cdunk.t-RISE)/SLAM); h={x:a.x+(RL.x-a.x)*u, y:a.y+(RL.y-6-a.y)*u};}
     } else {
-      const e=owner, dir=e===d?-1:1, charging=e===d?cpu.charging:charge.on;
+      const e=owner, charging=e===d?cpu.charging:charge.on, dir=charging?(e===d?-1:1):(e.face||(e===d?-1:1));
       h = (!charging && e.ground) ? dribblePos(e,dir,dt) : handPos(e,dir,charging);
     }
     ball.x=h.x; ball.y=h.y; ball.rot=(ball.rot||0)+dt*2.5;
@@ -1180,8 +1205,8 @@ function refreshManga(boy){MIMG[boy].src=mangaSrc(boy);}
 // sets up both players' looks, colours and names for the chosen kits and who is playing
 function applyLooks(){
   const o=other();
-  LOOK.p=kitLook(BOYS[human],kits[human],1);
-  LOOK.d=kitLook(BOYS[o],kits[o],-1);
+  LOOK.p=kitLook(BOYS[human],kits[human],1); LOOK.p.who="p";
+  LOOK.d=kitLook(BOYS[o],kits[o],-1); LOOK.d.who="d";
   C.p1=MAINS[kits[human].main]; C.p2=MAINS[kits[o].main];
   NAME.p=BOYS[human].name; NAME.d=BOYS[o].name;
   refreshManga("zackie"); refreshManga("keelan");
@@ -1712,7 +1737,7 @@ function drawPlayer(){
   shadow(p);
   let hx=12, hy=-26, ox=-12, oy=-24;
   if(tip.on && !p.ground){hx=20; hy=-84;}
-  else if(stealSwipe>0 && owner!==p){hx=(Math.sign(d.x-p.x)||1)*26; hy=-24;}
+  else if(stealSwipe>0 && owner!==p){hx=26; hy=-24;}
   else if(dunk.on && dunk.wind && !dunk.resolved){hx=ball.x-p.x; hy=ball.y-p.y; ox=-14; oy=-64;}
   else if(dunk.on){
     if(dunk.t<RISE){hx=10;hy=-96;ox=-16;oy=-66;}
@@ -1725,7 +1750,8 @@ function drawPlayer(){
   }
   else if(playerArmUp()){hx=20; hy=-84;}
   const hang=dunk.on && dunk.resolved && dunk.t-RISE-SLAM<dunk.hang;
-  drawAthlete(p,LOOK.p,{x:hx,y:hy},{x:ox,y:oy},!p.ground,hang);
+  const F=p.face||1;
+  drawAthlete(p,F===LOOK.p.dir?LOOK.p:Object.assign({},LOOK.p,{dir:F}),{x:hx*F,y:hy},{x:ox*F,y:oy},!p.ground,hang);
 }
 function drawCpu(){
   if(!cpuOn) return;
@@ -1744,7 +1770,8 @@ function drawCpu(){
   }
   else if(cpuArmUp()){hx=-20; hy=-84;}
   const hang=cdunk.on && cdunk.resolved && cdunk.t-RISE-SLAM<cdunk.hang;
-  drawAthlete(d,LOOK.d,{x:hx,y:hy},{x:ox,y:oy},!d.ground,hang);
+  const F=-(d.face||-1);   // 1 = his usual way (left), -1 = turned round
+  drawAthlete(d,F===1?LOOK.d:Object.assign({},LOOK.d,{dir:-LOOK.d.dir}),{x:hx*F,y:hy},{x:ox*F,y:oy},!d.ground,hang);
 }
 // pebbled leather texture: fixed dot pattern inside the ball, reused every frame
 const PEBBLES=Array.from({length:26},(_,i)=>{const a=i*2.399, r=Math.sqrt((i+0.5)/26)*7; return [Math.cos(a)*r,Math.sin(a)*r];});
