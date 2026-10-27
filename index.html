@@ -328,13 +328,35 @@ const SFX={
     hiss(0.03,{f:3000,q:0.7,vol:0.12*k}); },
   board(v){ const k=Math.min(1,(v||400)/600)*0.8+0.2; tone(190,0.14,{f2:110,vol:0.28*k}); hiss(0.06,{f:900,q:1,vol:0.12*k}); },
   swish(){ hiss(0.38,{f:6500,f2:2200,q:0.9,vol:0.22,atk:0.03}); },
-  cheer(size){ size=size||1;   // a crowd: noise shaped like voices, swelling up and dying away
-    const dur=1.2+size*0.9;
-    for(const [f,v] of [[520,0.12],[1150,0.1],[2300,0.06]]){
-      const h=hiss(dur,{f,q:0.8,vol:v*size,atk:0.25,hold:dur*0.45});
-      const lfo=SND.ctx.createOscillator(), lg=SND.ctx.createGain(); lfo.frequency.value=6+Math.random()*4; lg.gain.value=v*size*0.4;
+  cheer(size){   // an arena crowd going up: a roar, lots of fans yelling "woo!"/"yeah!", clapping, the odd whistle
+    size=size||1; const c=SND.ctx, t0=c.currentTime, dur=1.6+size*1.1, out=c.createGain();
+    out.gain.value=2.2; out.connect(SND.master);
+    // the roar: a wall of voices, swelling in, holding, then dying away
+    for(const [f,v] of [[380,0.16],[900,0.14],[1900,0.07]]){
+      const h=hiss(dur,{f,q:0.7,vol:v*Math.min(1.3,size),atk:0.22,hold:dur*0.5,dest:out});
+      const lfo=c.createOscillator(), lg=c.createGain(); lfo.frequency.value=3+Math.random()*3; lg.gain.value=v*0.25;
       lfo.connect(lg); lg.connect(h.g.gain); lfo.start(h.t); lfo.stop(h.t+dur);
     }
+    // single fans: a buzzy voice shaped into a vowel ("woo", "yeah", "ah"), sliding up then down
+    const vowels=[[300,870],[660,1720],[750,1200],[400,2000]], n=Math.round(10+size*12);
+    for(let i=0;i<n;i++){
+      const at=0.05+Math.random()*dur*0.6, len=0.35+Math.random()*0.7, f0=Math.random()<0.6?150+Math.random()*120:260+Math.random()*220;
+      const o=c.createOscillator(), g=c.createGain(), [F1,F2]=vowels[Math.floor(Math.random()*vowels.length)];
+      o.type="sawtooth"; o.frequency.setValueAtTime(f0,t0+at); o.frequency.linearRampToValueAtTime(f0*1.35,t0+at+len*0.35); o.frequency.linearRampToValueAtTime(f0*0.9,t0+at+len);
+      const vib=c.createOscillator(), vg=c.createGain(); vib.frequency.value=5+Math.random()*2; vg.gain.value=f0*0.03; vib.connect(vg); vg.connect(o.frequency);
+      const f1=c.createBiquadFilter(), f2=c.createBiquadFilter(); f1.type=f2.type="bandpass"; f1.frequency.value=F1; f2.frequency.value=F2; f1.Q.value=f2.Q.value=5;
+      const v=(0.012+Math.random()*0.02)*Math.min(1.4,size);
+      g.gain.setValueAtTime(0.0001,t0+at); g.gain.exponentialRampToValueAtTime(v,t0+at+0.06); g.gain.setValueAtTime(v,t0+at+len*0.6); g.gain.exponentialRampToValueAtTime(0.0001,t0+at+len);
+      o.connect(f1); o.connect(f2); f1.connect(g); f2.connect(g); g.connect(out);
+      o.start(t0+at); o.stop(t0+at+len+0.05); vib.start(t0+at); vib.stop(t0+at+len+0.05);
+    }
+    // clapping and applause, from a pre-made clapping track
+    const src=c.createBufferSource(), cg=c.createGain(); src.buffer=applauseBuf(); cg.gain.setValueAtTime(0.0001,t0);
+    cg.gain.exponentialRampToValueAtTime(0.55*Math.min(1.3,size),t0+0.3); cg.gain.setValueAtTime(0.55*Math.min(1.3,size),t0+dur*0.6); cg.gain.exponentialRampToValueAtTime(0.0001,t0+dur+0.4);
+    src.connect(cg); cg.connect(out); src.start(t0+0.1,Math.random()*0.5); src.stop(t0+dur+0.5);
+    // a fan whistle on the big ones
+    if(size>=1.1) for(let k=0;k<(size>1.4?2:1);k++){const at=0.3+Math.random()*0.8;
+      tone(1900+Math.random()*500,0.5,{f2:2700+Math.random()*400,vol:0.05,at,dest:out}); tone(2700,0.35,{f2:2100,vol:0.04,at:at+0.55,dest:out});}
   },
   groan(){ hiss(0.9,{f:420,f2:300,q:1.2,vol:0.09,atk:0.12}); },
   thunder(){   // a sharp crack, then a long low rumble
@@ -357,6 +379,36 @@ const SFX={
   tick(){ tone(1500,0.06,{vol:0.13}); tone(2250,0.05,{vol:0.07,at:0.01}); },
   click(){ tone(900,0.03,{vol:0.12}); }
 };
+let applause=null;
+function applauseBuf(){
+  if(applause) return applause;
+  const c=SND.ctx, sr=c.sampleRate, len=Math.floor(sr*3.5), buf=c.createBuffer(1,len,sr), d=buf.getChannelData(0);
+  for(let k=0;k<1400;k++){   // each clap: a tiny crack of noise that dies away in a few milliseconds
+    const start=Math.floor(Math.random()*(len-sr*0.03)), clen=Math.floor(sr*(0.006+Math.random()*0.012)), a=0.15+Math.random()*0.35, tone2=Math.random();
+    let lp=0;
+    for(let i=0;i<clen;i++){const n=Math.random()*2-1; lp=lp+(n-lp)*(0.35+tone2*0.5); d[start+i]+=(n-lp*0.6)*a*Math.exp(-i/(clen*0.3));}
+  }
+  for(let i=0;i<len;i++) d[i]=Math.max(-1,Math.min(1,d[i]*0.6));
+  return applause=buf;
+}
+// a low murmur from the stands that runs during games, so cheers rise out of real arena noise
+let amb=null;
+function ambientTick(){
+  const want=SND.on && SND.ctx && SND.ctx.state==="running" && (screen==="play"||screen==="pause"||screen==="over");
+  if(want && !amb){
+    try{
+      const c=SND.ctx, src=c.createBufferSource(), fl=c.createBiquadFilter(), fl2=c.createBiquadFilter(), g=c.createGain();
+      src.buffer=SND.noise; src.loop=true; fl.type="bandpass"; fl.frequency.value=500; fl.Q.value=0.6; fl2.type="lowpass"; fl2.frequency.value=1400;
+      g.gain.setValueAtTime(0.0001,c.currentTime); g.gain.exponentialRampToValueAtTime(0.035,c.currentTime+1.2);
+      const lfo=c.createOscillator(), lg=c.createGain(); lfo.frequency.value=0.25; lg.gain.value=0.01; lfo.connect(lg); lg.connect(g.gain);
+      src.connect(fl); fl.connect(fl2); fl2.connect(g); g.connect(SND.master); src.start(); lfo.start();
+      amb={src,lfo,g};
+    }catch(_){}
+  } else if(!want && amb){
+    try{const t=SND.ctx.currentTime; amb.g.gain.setTargetAtTime(0.0001,t,0.2); amb.src.stop(t+1); amb.lfo.stop(t+1);}catch(_){}
+    amb=null;
+  }
+}
 function play(name,arg){
   if(!SND.on||!SND.ctx||SND.ctx.state!=="running") return;
   const now=performance.now(); if(now-(SND.last[name]||0)<45) return;   // the same sound can't stack up in one moment
@@ -827,7 +879,7 @@ function arrive(t){
     ball.state="made"; ball.x=rim.x; ball.y=rim.y; ball.timer=0;
     netKick(byP?1:0, ball.dunk?9:3, ball.dunk?(byP?2:-2):0); // swish, or a hard yank on a dunk
     if(ball.dunk) play("slam"); else play("swish");
-    play("cheer", ball.wind?1.6:(ball.dunk?1.3:(ball.far?1.5:(ball.pts===3?1.1:0.7))));
+    play("cheer", ball.wind?1.8:(ball.dunk?1.4:(ball.far?1.6:(ball.lucky?0.8:(ball.pts===3?1.15:0.75)))));
     if(byP){
       stats.score+=ball.pts; stats.made++; if(ball.pts===3) stats.threes++; if(ball.dunk) stats.dunks++; stats.streak++; stats.best=Math.max(stats.best,stats.streak);
       const cat=ball.lucky?"lucky":ball.wind?"windmill":(ball.dunk?"dunk":(ball.far?"half":(ball.fade?"fade":(stats.streak>=3?"fire":(ball.pts===3?"three":"two")))));
@@ -2102,7 +2154,7 @@ cv.addEventListener("blur",()=>{keys.clear();keyJoy=0;keyJoyY=0;shootKey=false;}
 let last=performance.now();
 function frame(now){
   const dt=Math.min(0.033,(now-last)/1000); last=now;
-  update(dt); draw(); requestAnimationFrame(frame);
+  update(dt); draw(); ambientTick(); requestAnimationFrame(frame);
 }
 loadSave(); applyLooks(); fit(); inbound("p"); screen="title";
 requestAnimationFrame(frame);
