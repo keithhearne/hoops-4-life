@@ -347,9 +347,8 @@ const SFX={
     sample("whistle",{vol:0.75,rate:vary(0.015)});
     if(long) sample("whistle",{vol:0.85,rate:0.985,at:0.42});
   },
-  dribble(){ sample("bounce"+(1+Math.floor(Math.random()*3)),{vol:0.55,rate:vary(0.04)}); },
-  bounce(v){ const k=Math.min(1,v/700); if(k<0.08) return;
-    sample("bounce"+(1+Math.floor(Math.random()*3)),{vol:0.15+0.7*k,rate:vary(0.04)}); },
+  dribble(){ tone(130,0.09,{f2:60,vol:0.22}); hiss(0.03,{filter:"lowpass",f:500,vol:0.08}); },
+  bounce(v){ const k=Math.min(1,v/700); if(k<0.08) return; tone(120,0.12,{f2:55,vol:0.3*k+0.03}); hiss(0.04,{filter:"lowpass",f:600,vol:0.12*k}); },
   rim(v){ const k=Math.min(1,(v||400)/600);   // ball on the rim: a rubber thump with a short, choked clank
     sample(k>0.55?"rim2":"rim1",{vol:0.3+0.55*k,rate:vary(0.05)}); },
   board(v){ const k=Math.min(1,(v||400)/600); sample("board",{vol:0.3+0.6*k,rate:vary(0.04)}); },
