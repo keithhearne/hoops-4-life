@@ -1315,12 +1315,13 @@ function endGame(){
   const youWin=stats.score>=WIN; overWinner=youWin?"p":"d";
   if(youWin) wins[human]=(wins[human]||0)+1;
   newRoad=false;
-  if(mode==="level" && youWin && level>=progress[human]){
+  const skipped=TEST_UNLOCK && level>progress[human];   // test mode: playing ahead doesn't change saved progress
+  if(mode==="level" && youWin && level>=progress[human] && !skipped){
     progress[human]=Math.min(LEVELS,level+1);
     newRoad = progress[human]<LEVELS && progress[human]%STOPS===0;
   }
   // lose to a boss: back to game 6, win it again to get another shot at him
-  if(mode==="level" && !youWin && BOSS && level>=progress[human]) progress[human]=level-1;
+  if(mode==="level" && !youWin && BOSS && level>=progress[human] && !skipped) progress[human]=level-1;
   saveGame(); screen="over";
 }
 function openSetup(m){mode=m; screen="setup";}
@@ -1609,6 +1610,7 @@ function bossCard(i,x,y,w,h){
   text(SIG_INFO[b.sk],tx,sy+42,BODY(12,800),C.ink);
   text("Beat him to finish Level "+(i+1),tx,y+h-22,BODY(12,800),C.muted);
 }
+const TEST_UNLOCK=false;   // preview only: every level and boss can be played. The published site sets this to false
 let pickByPlayer=false;   // true when the level comes from the 1 v 1 button, so either boy can pick up his own next level
 function openLevel(n,byPlayer){level=n; mode="level"; screen="setup"; pickByPlayer=!!byPlayer;}
 function openNextLevel(){openLevel(Math.min(progress[human],LEVELS-1),true);}
@@ -1617,7 +1619,7 @@ function tapMap(q){
   for(let r=0;r<ROADS.length;r++) for(let i=0;i<STOPS;i++){
     const s=stopPos(r,i), n=r*STOPS+i;
     if(Math.hypot(q.x-s.x,cy-s.y)<STOP_R+10){
-      if(n<=progress[human]) openLevel(n);
+      if(n<=progress[human] || TEST_UNLOCK) openLevel(n);
       else mapMsg={text:"Win "+levelName(progress[human])+" first",t:1.8};
       return;
     }
@@ -1734,6 +1736,7 @@ function drawRoadMap(){
     }
   });
   ctx.restore();
+  if(TEST_UNLOCK){ctx.fillStyle="rgba(224,58,58,0.92)"; rr(MAP.x+MAP.w/2-92,MAP.y+MAP.h-26,184,20,8); ctx.fill(); text("TEST MODE · ALL LEVELS OPEN",MAP.x+MAP.w/2,MAP.y+MAP.h-16,BODY(10,900),"#FFFFFF","center");}
   // scroll bar
   const max=mapMaxScroll();
   if(max>0){
