@@ -1363,7 +1363,7 @@ function mapMaxScroll(){return Math.max(0,mapContentH()-VIEW.h);}
 // ---------- levels: every stop is a 1 v 1 game, each one a bit harder than the last ----------
 const LEVELS=ROADS.length*STOPS;
 let progress={zackie:0,keelan:0}, level=0, newRoad=false;   // progress = how many levels that boy has beaten
-function levelName(n){return "Level "+(Math.floor(n/STOPS)+1)+" · Part "+(n%STOPS+1);}
+function levelName(n){return "Level "+(Math.floor(n/STOPS)+1)+" · Game "+(n%STOPS+1);}
 function levelTarget(n){const lv=Math.floor(n/STOPS); return lv<10?11:(lv<20?15:21);}   // longer games in later levels
 function levelSkill(n){
   const t=n/(LEVELS-1), L=(a,b)=>a+(b-a)*t;   // level 1 = easiest, last level = hardest
@@ -1604,7 +1604,7 @@ function drawOver(){
   portraitBadge(boy,180,186,112);
   let size=40; ctx.font=DISP(size);
   const lv=mode==="level", allDone=lv && youWin && level===LEVELS-1;
-  const head=allDone?"ALL 30 LEVELS DONE!":(lv&&youWin?(level%STOPS===STOPS-1?"LEVEL "+(Math.floor(level/STOPS)+1)+" COMPLETE!":"PART "+(level%STOPS+1)+" WON!"):(youWin?NAME.p:NAME.d).toUpperCase()+" WINS!");
+  const head=allDone?"ALL 30 LEVELS DONE!":(lv&&youWin?(level%STOPS===STOPS-1?"LEVEL "+(Math.floor(level/STOPS)+1)+" COMPLETE!":"GAME "+(level%STOPS+1)+" WON!"):(youWin?NAME.p:NAME.d).toUpperCase()+" WINS!");
   while(size>24 && ctx.measureText(head).width>470){size-=2; ctx.font=DISP(size);}
   bigTitle(head,330,62,size,"left");
   text(NAME.p+"  "+stats.score+"  –  "+stats.cpu+"  "+NAME.d,332,104,BODY(20,900),C.ink);
@@ -1616,7 +1616,7 @@ function drawOver(){
     ctx.fillStyle="rgba(46,56,102,0.9)"; rr(cx,cy-15,224,32,10); ctx.fill();
     text(l,cx+12,cy+1,BODY(14,800),C.muted); text(v,cx+212,cy+2,DISP(16),C.ink,"right");});
   if(lv){
-    if(youWin && level<LEVELS-1) button(332,312,220,50,(level+1)%STOPS===0?"NEXT LEVEL":"NEXT PART",{fill:"#F26B1D",ink:C.navy,sub:levelName(level+1)},()=>{level++; startGame();});
+    if(youWin && level<LEVELS-1) button(332,312,220,50,(level+1)%STOPS===0?"NEXT LEVEL":"NEXT GAME",{fill:"#F26B1D",ink:C.navy,sub:levelName(level+1)},()=>{level++; startGame();});
     else button(332,312,220,50,youWin?"PLAY AGAIN":"TRY AGAIN",{fill:"#F26B1D",ink:C.navy},()=>startGame());
     button(564,312,140,50,"MAP",{outline:"rgba(255,255,255,0.3)"},toMap);
   } else {
