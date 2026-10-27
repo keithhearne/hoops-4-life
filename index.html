@@ -1880,7 +1880,7 @@ const TROPHY_TYPES=[
 let bonus={zackie:{m:0,c:0},keelan:{m:0,c:0}}, spent={zackie:{m:0,c:0},keelan:{m:0,c:0}};
 let extraBalls={zackie:[],keelan:[]}, shoesOwned={zackie:[],keelan:[]};
 function wallet(b){return {m:medals[b].length+bonus[b].m-spent[b].m, c:crowns[b].length+bonus[b].c-spent[b].c};}
-function canBuy(b,t){const w=wallet(b); return w.m>=t.price.m && w.c>=t.price.c;}
+function canBuy(b,t){if(TEST_UNLOCK) return true; const w=wallet(b); return w.m>=t.price.m && w.c>=t.price.c;}
 let tro={stage:"shop",type:null,taps:0,shake:0,t:0,last:0,wheel:null,msg:{text:"",t:0},parts:[]};
 const pickOne=a=>a[Math.floor(Math.random()*a.length)];
 function buildWheel(t,boy){
@@ -1930,7 +1930,7 @@ function itemName(it){
 }
 function buyTrophy(t){
   if(!canBuy(human,t)){tro.msg={text:"Not enough medals or crowns yet: win more games!",t:2}; return;}
-  spent[human].m+=t.price.m; spent[human].c+=t.price.c; saveGame();
+  if(!TEST_UNLOCK){spent[human].m+=t.price.m; spent[human].c+=t.price.c; saveGame();}   // test mode: free
   tro={stage:"box",type:t,taps:0,shake:0,t:0,last:performance.now(),wheel:null,msg:{text:"",t:0},parts:[]};
   play("cheer",0.75);
 }
@@ -1941,7 +1941,7 @@ function tapTrophy(){
     tro.stage="burst"; tro.t=0; play("glass",true); play("thunder");
     tro.parts=Array.from({length:46},()=>{const a=Math.random()*Math.PI*2, v=120+Math.random()*320; return {x:W/2,y:200,vx:Math.cos(a)*v,vy:Math.sin(a)*v-120,r:2+Math.random()*5,c:Math.random()<0.5?tro.type.col:"#FFFFFF"};});
     tro.wheel=buildWheel(tro.type,human);
-    grant(tro.wheel.items[tro.wheel.win],human);   // saved straight away, so closing the app mid-spin loses nothing
+    if(!TEST_UNLOCK) grant(tro.wheel.items[tro.wheel.win],human);   // test mode: nothing is kept   // saved straight away, so closing the app mid-spin loses nothing
   }
 }
 function drawTrophyIcon(x,y,s,t,cracks){   // a cup on a stand; diamonds get a gem
@@ -2005,7 +2005,8 @@ function drawTrophies(){
       button(x+16,y+196,cw-32,36,"BUY",{fill:ok?t.col:"rgba(60,68,100,0.9)",ink:ok?C.navy:"rgba(255,255,255,0.45)"},()=>buyTrophy(t));
     });
     button(16,344,130,36,"BACK",{},()=>{screen="title";});
-    text("Win games for medals and beat bosses for crowns",W/2,362,BODY(12,800),C.muted,"center");
+    if(TEST_UNLOCK){ctx.fillStyle="rgba(224,58,58,0.92)"; rr(W/2-170,350,340,24,8); ctx.fill(); text("TEST MODE · trophies are free, prizes are not kept",W/2,362,BODY(11,900),"#FFFFFF","center");}
+    else text("Win games for medals and beat bosses for crowns",W/2,362,BODY(12,800),C.muted,"center");
   } else if(tro.stage==="box"){
     text(tro.type.name+" TROPHY",W/2,30,DISP(24),tro.type.col,"center");
     const sx=tro.shake>0?Math.sin(now/22)*8*tro.shake/0.35:0;
@@ -2054,7 +2055,7 @@ function drawTrophies(){
       text(it.kind==="player"?"NEW PLAYER!":"YOU WON",W/2,124,DISP(22),C.warn,"center");
       drawItemIcon(it,W/2,178,2.2);
       text(itemName(it),W/2,232,DISP(18),C.ink,"center");
-      text(it.kind==="player"?"Pick him on the Players screen to play with his abilities":it.kind==="ball"?"Pick it as your ball before a game":it.kind==="shoes"?"Pick them as your shoes before a game":"Added to "+BOYS[human].name+"'s prizes",W/2,256,BODY(12,800),C.muted,"center");
+      text(TEST_UNLOCK?"TEST MODE: this prize is not kept":it.kind==="player"?"Pick him on the Players screen to play with his abilities":it.kind==="ball"?"Pick it as your ball before a game":it.kind==="shoes"?"Pick them as your shoes before a game":"Added to "+BOYS[human].name+"'s prizes",W/2,256,BODY(12,800),C.muted,"center");
       ctx.restore();
       if(tro.t>0.5) button(W/2-90,306,180,44,"COLLECT",{fill:"#F26B1D",ink:C.navy},()=>{tro.stage="shop";});
     } else text(tro.stage==="spin"?"SPINNING...":"",W/2,374,DISP(16),C.warn,"center");
