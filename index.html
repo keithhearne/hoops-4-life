@@ -1284,10 +1284,15 @@ function loadSave(){
     if(BOYS[s.human]) human=s.human;
     if(s.wins) wins=Object.assign({zackie:0,keelan:0},s.wins);
     if(s.progress) progress=Object.assign({zackie:0,keelan:0},s.progress);
+    for(const b of ["zackie","keelan"]){
+      if(s.medals&&Array.isArray(s.medals[b])) medals[b]=s.medals[b]; if(s.crowns&&Array.isArray(s.crowns[b])) crowns[b]=s.crowns[b];
+      // older saves: give the medals and crowns for every game already beaten
+      for(let n=0;n<Math.min(progress[b],LEVELS);n++){const box=n%STOPS===STOPS-1?crowns[b]:medals[b]; if(!box.includes(n)) box.push(n);}
+    }
     if(s.sound===false) SND.on=false;
   }catch(_){}
 }
-function saveGame(){try{localStorage.setItem(SAVE_KEY,JSON.stringify({kits,human,wins,progress,sound:SND.on}));}catch(_){}}
+function saveGame(){try{localStorage.setItem(SAVE_KEY,JSON.stringify({kits,human,wins,progress,medals,crowns,sound:SND.on}));}catch(_){}}
 
 // ---------- screens: title, setup, play, pause, game over ----------
 let screen="title", mode="vs", overWinner="p", ui=[];
@@ -1314,7 +1319,8 @@ function startGame(){
 function endGame(){
   const youWin=stats.score>=WIN; overWinner=youWin?"p":"d";
   if(youWin) wins[human]=(wins[human]||0)+1;
-  newRoad=false;
+  newRoad=false; newAward=null;
+  if(mode==="level" && youWin){const box=BOSS?crowns[human]:medals[human]; if(!box.includes(level)){box.push(level); newAward=BOSS?"crown":"medal";}}
   const skipped=TEST_UNLOCK && level>progress[human];   // test mode: playing ahead doesn't change saved progress
   if(mode==="level" && youWin && level>=progress[human] && !skipped){
     progress[human]=Math.min(LEVELS,level+1);
@@ -1400,7 +1406,8 @@ const VIEW={y:MAP.y+48,h:MAP.h-48};   // the scrolling part of the map, under th
 function mapMaxScroll(){return Math.max(0,mapContentH()-VIEW.h);}
 // ---------- levels: every stop is a 1 v 1 game, each one a bit harder than the last ----------
 const LEVELS=ROADS.length*STOPS;
-let progress={zackie:0,keelan:0}, level=0, newRoad=false;   // progress = how many levels that boy has beaten
+let progress={zackie:0,keelan:0}, level=0, newRoad=false, newAward=null;
+let medals={zackie:[],keelan:[]}, crowns={zackie:[],keelan:[]};   // the games each boy has won: a medal for each game, a crown for each boss   // progress = how many levels that boy has beaten
 function levelName(n){return "Level "+(Math.floor(n/STOPS)+1)+" · Game "+(n%STOPS+1);}
 function levelTarget(n){return 21;}   // every game is first to 21
 function levelSkill(n){
@@ -1754,6 +1761,31 @@ function drawRoadMap(){
   }
 }
 function inMap(q){return q.x>=MAP.x&&q.x<=MAP.x+MAP.w&&q.y>=VIEW.y&&q.y<=VIEW.y+VIEW.h;}
+function drawMedal(x,y,r){   // a gold medal on a ribbon
+  ctx.save(); ctx.lineJoin="round";
+  ctx.fillStyle="#2F6FE4"; ctx.beginPath(); ctx.moveTo(x-r*0.9,y-r*2.1); ctx.lineTo(x-r*0.25,y-r*2.1); ctx.lineTo(x+r*0.35,y-r*0.6); ctx.lineTo(x-r*0.25,y-r*0.5); ctx.closePath(); ctx.fill();
+  ctx.fillStyle="#E03A3A"; ctx.beginPath(); ctx.moveTo(x+r*0.9,y-r*2.1); ctx.lineTo(x+r*0.25,y-r*2.1); ctx.lineTo(x-r*0.35,y-r*0.6); ctx.lineTo(x+r*0.25,y-r*0.5); ctx.closePath(); ctx.fill();
+  ctx.fillStyle="#FFC93C"; ctx.strokeStyle="#B07A00"; ctx.lineWidth=Math.max(1.5,r*0.12);
+  ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle="#FFE48A"; ctx.beginPath();   // a star in the middle
+  for(let k=0;k<10;k++){const a=-Math.PI/2+k*Math.PI/5, rr2=k%2?r*0.28:r*0.62; ctx[k?"lineTo":"moveTo"](x+Math.cos(a)*rr2,y+Math.sin(a)*rr2);}
+  ctx.closePath(); ctx.fill(); ctx.strokeStyle="#B07A00"; ctx.lineWidth=1; ctx.stroke();
+  ctx.restore();
+}
+// the middle of the menu: how many medals and boss crowns the selected boy has won
+function drawTrophies(boy,cx,y){
+  const w=176, x=cx-w/2, h=208, col=MAINS[kits[boy].main];
+  ctx.fillStyle="rgba(16,21,43,0.92)"; rr(x,y,w,h,18); ctx.fill();
+  ctx.strokeStyle=col; ctx.lineWidth=3; ctx.stroke();
+  text(BOYS[boy].name.toUpperCase()+"'S TROPHIES",cx,y+20,BODY(12,900),C.muted,"center");
+  const nMed=medals[boy].length, nCrown=crowns[boy].length, maxMed=LEVELS-ROADS.length, maxCrown=ROADS.length;
+  drawMedal(x+44,y+76,20);
+  text(String(nMed),x+76,y+66,DISP(30),C.ink); text("MEDALS · of "+maxMed,x+77,y+92,BODY(10,900),C.muted);
+  ctx.strokeStyle="rgba(255,255,255,0.12)"; ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(x+16,y+112); ctx.lineTo(x+w-16,y+112); ctx.stroke();
+  drawCrown(x+44,y+160,20);
+  text(String(nCrown),x+76,y+142,DISP(30),C.ink); text("CROWNS · of "+maxCrown,x+77,y+168,BODY(10,900),C.muted);
+  text(nCrown?"Last boss: "+BOSSES[Math.floor(Math.max(...crowns[boy])/STOPS)].name:"Beat a boss to win his crown",cx,y+192,BODY(10,800),nCrown?C.warn:C.muted,"center");
+}
 function drawTitle(){
   ui=[]; drawCourt(); drawNetLayer(false); drawNetLayer(true); shade(0.72);
   // road map on the left, title and game modes in a column on the right
@@ -1761,6 +1793,7 @@ function drawTitle(){
   const bw=320, bx=W-16-bw, cx=bx+bw/2;
   let ts=40; ctx.font=DISP(ts); while(ts>22 && ctx.measureText("HOOPS 4 LIFE").width>bw){ts-=2; ctx.font=DISP(ts);}
   bigTitle("HOOPS 4 LIFE",cx,40,ts,"center");
+  drawTrophies(human,412,92);
   text(BOYS.zackie.name+" vs "+BOYS.keelan.name,cx,74,BODY(15,900),C.ink,"center");
   button(bx,92,bw,50,"1 v 1 vs COMPUTER",{fill:"#2F6FE4",sub:BOYS[human].name+" · "+(progress[human]>=LEVELS?"all levels beaten!":levelName(progress[human]))},openNextLevel);
   button(bx,150,bw,50,"SHOOTING PRACTICE",{fill:"#F26B1D",ink:C.navy,sub:"No defender"},()=>openSetup("practice"));
@@ -1860,7 +1893,7 @@ function drawOver(){
   bigTitle(head,330,62,size,"left");
   text(NAME.p+"  "+stats.score+"  –  "+stats.cpu+"  "+NAME.d,332,104,BODY(20,900),C.ink);
   if(lv && BOSS && !youWin) text("BOSS WINS · WIN GAME 6 AGAIN FOR ANOTHER SHOT AT "+BOSS.name.toUpperCase(),332,140,BODY(12,900),C.warn);
-  else if(lv) text((BOSS&&youWin?"BOSS BEATEN!   ·   ":"")+levelName(level).toUpperCase()+(newRoad?"   ·   LEVEL "+(Math.floor(progress[human]/STOPS)+1)+" OPEN + NEW BALL!":""),332,140,BODY(12,900),newRoad||BOSS?C.warn:C.muted);
+  else if(lv) text((newAward==="crown"?"+1 CROWN!   ·   ":newAward==="medal"?"+1 MEDAL!   ·   ":"")+(BOSS&&youWin?"BOSS BEATEN!   ·   ":"")+levelName(level).toUpperCase()+(newRoad?"   ·   LEVEL "+(Math.floor(progress[human]/STOPS)+1)+" OPEN + NEW BALL!":""),332,140,BODY(12,900),newRoad||BOSS?C.warn:C.muted);
   else text(NAME.p.toUpperCase()+"'S GAME",332,140,BODY(12,900),C.muted);
   const rows=[["Shots made",stats.made+" / "+stats.att],["3-pointers",String(stats.threes)],["Dunks",String(stats.dunks)],
     ["Blocks",String(stats.blk)],["Best streak",String(stats.best)],["Steals",String(stats.stl)]];
