@@ -174,7 +174,7 @@ function zoneFor(x,rim){
   const xx=rim.dir>0?x:W-x; return xx>THREE?ZONES.inside:(xx>HALF?ZONES.mid:ZONES.far);
 }
 function rot(lx,ly,a,ox,oy){const c=Math.cos(a),s=Math.sin(a);return {x:ox+lx*c-ly*s,y:oy+lx*s+ly*c};}
-function handPos(e,dir,charging){return rot(charging?dir*4:dir*14, charging?-74:-58, e.lean, e.x, e.y);}
+function handPos(e,dir,charging){const k=(e===d&&BOSS)?BS.size:1; return rot((charging?dir*4:dir*14)*k, (charging?-74:-58)*k, e.lean, e.x, e.y);}
 function shotPath(x0,y0,tx,ty){const T=0.75+Math.abs(tx-x0)/900;return {vx:(tx-x0)/T, vy:(ty-y0-0.5*GB*T*T)/T, T};}
 function targetFor(power,range,auto){
   if(auto) return RR.x+80;
@@ -186,6 +186,7 @@ function say(text,sub,color){msg={text,sub:sub||"",t:1.9,color:color||C.ink};}
 function body(e,dt){if(!e.ground){e.vy+=G*dt;e.y+=e.vy*dt;if(e.y>=FLOOR){e.y=FLOOR;e.vy=0;e.ground=true;}}}
 function pickSpot(){
   const r=Math.random();
+  if(BOSS && BS.deep) return r<0.25?130+Math.random()*140:(r<0.8?300+Math.random()*110:430+Math.random()*50);   // Deep Range likes the long ones
   if(r<0.6) return 130+Math.random()*140;
   if(r<0.95) return 300+Math.random()*110;
   return 430+Math.random()*50;
@@ -196,7 +197,7 @@ function cpuDefending(){return owner===p || (ball.state==="flight"&&ball.shooter
 function playerDefending(){return owner===d || (ball.state==="flight"&&ball.shooter===d);}
 function cpuArmUp(){return cpuOn && cpuDefending() && (!d.ground || charge.on || dunk.on || ball.state==="flight");}
 function playerArmUp(){return playerDefending() && (!p.ground || cpu.charging || cdunk.on || ball.state==="flight");}
-function cpuHand(){return {x:d.x+20*(d.face||-1),y:d.y-84};}
+function cpuHand(){const S=BOSS?BS.size:1, A=BOSS?BS.arm*(sig.on==="block"&&BOSS.sv.reach?1.3:1):1; return {x:d.x+20*A*(d.face||-1),y:d.y-84*S-(A-1)*30};}
 function playerHand(){return {x:p.x+20*(p.face||1),y:p.y-84};}
 // Which way each player faces (1 = right, -1 = left).
 // Defending: face the ball handler, so from behind you turn and chase him, and once past him you face him.
@@ -266,6 +267,8 @@ function drawCountdown(){
   ctx.lineWidth=8; ctx.lineJoin="round"; ctx.strokeStyle=C.navy; ctx.strokeText(String(n),TIP_X,TIP_Y+70);
   ctx.fillStyle=C.warn; ctx.fillText(String(n),TIP_X,TIP_Y+70);
   ctx.restore();
+  if(BOSS){ctx.save(); ctx.font=DISP(18); ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.lineWidth=6; ctx.lineJoin="round";
+    ctx.strokeStyle=C.navy; ctx.strokeText("BOSS GAME: "+NAME.d.toUpperCase(),TIP_X,TIP_Y+128); ctx.fillStyle=C.ink; ctx.fillText("BOSS GAME: "+NAME.d.toUpperCase(),TIP_X,TIP_Y+128); ctx.restore();}
 }
 function endTip(w){
   tip.on=false; tip.fade=0.6;
@@ -279,7 +282,8 @@ function endTip(w){
 }
 function takeBall(e){
   owner=e; ball.state="held"; ball.live=false;
-  if(e===d){setCpuPlan(); d.lean=0; say(NAME.d+"'s ball!","Get in front of him: JUMP to block, or STEAL",C.warn);}
+  if(e===d){setCpuPlan(); d.lean=0; say(NAME.d+"'s ball!","Get in front of him: JUMP to block, or STEAL",C.warn);
+    if(sig.on==="reb"){ if(BOSS.sv.dunk && d.x<300){cpu.dunk=true; cpu.spot=clamp(d.x,115,155); cpuBurst=1.5;} else endSig(); }}
   else {say("Your ball!","Go score on the right hoop",C.info);}
 }
 
@@ -546,6 +550,7 @@ function startCharge(){
   // He guesses roughly when you'll let go (from the middle of the sweet spot), with random error.
   const z=charge.zone, est=(z.n[0]+z.n[1])/200*(z.fill||FILL);
   d.react = Math.random()<SKILL.noReact ? null : Math.max(0.2, est-0.2+(Math.random()*2-1)*SKILL.timingNoise);
+  if(BOSS && Math.abs(d.x-p.x)<140 && sigReady("block")){fireSig(); d.react=Math.max(0.2,est-0.12);}
 }
 function release(auto){
   const z=zoneFor(p.x,RR), range=charge.fade?z.f:z.n, pw=charge.power;
@@ -564,7 +569,9 @@ function release(auto){
 // ---------- computer shooting ----------
 function cpuRelease(){
   const z=zoneFor(d.x,RL), h=handPos(d,-1,true);
-  const chance=Math.min(0.95,z.cpu*SKILL.acc*(cpu.fade?0.85:1)), make=Math.random()<chance;
+  let chance=Math.min(0.95,z.cpu*SKILL.acc*(cpu.fade?0.85:1)*(BOSS&&BS.deep&&z!==ZONES.inside?1+BS.deep*1.5:1));
+  if(sig.on==="shot"){chance=z===ZONES.far?0.6:0.9; sig.n--; if(sig.n<=0) endSig();}
+  const make=Math.random()<chance;
   const s=Math.random()<0.5?-1:1, tx=make?RL.x:(s>0?RL.x+20+Math.random()*16:RL.x-Math.min(15,11.8+Math.random()*2.6));   // front of the rim, or back of the rim
   const sp=shotPath(h.x,h.y,tx,RL.y);
   const over=(tx-RL.x)*RL.dir>0;
@@ -650,7 +657,7 @@ function update(dt){
   }
   if(dunk.on) updateDunk(dt);
   else {
-    if(!tip.on) p.x=clamp(p.x+joy*(charge.on?70:170)*dt,24,812);
+    if(!tip.on) p.x=clamp(p.x+joy*(charge.on?70:170)*dt*playerSpeedK(joy),24,812);
     if(jumpQueued && p.ground){p.vy=-380;p.ground=false;p.dbl=false; play("squeak");}
     else if(jumpQueued && !p.ground && !p.dbl && playerDefending()){
       // double jump: only works if the second tap lands near the top of the first jump
@@ -679,10 +686,11 @@ function update(dt){
     }
   } else if(charge.on && owner!==p){charge.on=false;}
   p.lean+=(((charge.on&&charge.fade)?-0.25:0)-p.lean)*Math.min(1,dt*12);
+  if(BOSS && pStun>0) p.lean=Math.sin(performance.now()/45)*0.14;   // wobbly ankles
   if(charge.shown>0) charge.shown-=dt;
 
   // computer
-  if(cpuOn) cpuUpdate(dt);
+  if(cpuOn){ bossTick(dt); cpuUpdate(dt); }
   updateFacing(joy);
 
   // ball
@@ -695,7 +703,7 @@ function update(dt){
       if(dunk.t<RISE) h=a;
       else {const u=Math.min(1,(dunk.t-RISE)/SLAM); h={x:a.x+(RR.x-a.x)*u, y:a.y+(RR.y-6-a.y)*u};}
     } else if(owner===d && cdunk.on){
-      const a={x:d.x-10,y:d.y-96};
+      const k=BOSS?BS.size:1, a={x:d.x-10*k,y:d.y-96*k};
       if(cdunk.t<RISE) h=a;
       else {const u=Math.min(1,(cdunk.t-RISE)/SLAM); h={x:a.x+(RL.x-a.x)*u, y:a.y+(RL.y-6-a.y)*u};}
     } else {
@@ -723,11 +731,11 @@ function update(dt){
     const saveZone=vyNow>0 && Math.abs(ball.x-rimX)<95 && ball.y<RIM_Y+2;
     if((early||saveZone) && ball.shooter===p && cpuArmUp()){
       const hd=cpuHand();
-      if(Math.hypot(ball.x-hd.x,ball.y-hd.y)<18){blocked(d,!early);return;}
+      if(Math.hypot(ball.x-hd.x,ball.y-hd.y)<(BOSS?BS.blockR+(sig.on==="block"?12:0):18)){blocked(d,!early);return;}
     }
     if((early||saveZone) && ball.shooter===d && playerArmUp()){
       const hd=playerHand();
-      if(Math.hypot(ball.x-hd.x,ball.y-hd.y)<18){blocked(p,!early);return;}
+      if(Math.hypot(ball.x-hd.x,ball.y-hd.y)<(ball.fade&&BOSS&&BS.fade?18*Math.max(0.35,1-BS.fade*1.3):18)){blocked(p,!early);return;}
     }
     if(ball.make){ if(t>=ball.T) arrive(t); }
     else if(hit || t>=ball.T+0.25 || ball.y>FLOOR-BALL_R) missNow();
@@ -746,7 +754,8 @@ function update(dt){
     else if(!cpuOn){ if(ball.timer>1.6) inbound("p"); }
     else if(ball.timer>0.25){
       for(const e of [p,d]){
-        if(Math.abs(ball.x-e.x)<24 && ball.y>e.y-92){takeBall(e);break;}
+        const R=(e===d&&BOSS)?24+BS.reb*40+(sig.on==="reb"?30:0):24, Hh=(e===d&&BOSS)?92*BS.size+(BS.arm-1)*30:92;
+        if(Math.abs(ball.x-e.x)<R && ball.y>e.y-Hh){takeBall(e);break;}
       }
       if(ball.state==="free" && ball.timer>6) takeBall(Math.abs(ball.x-p.x)<Math.abs(ball.x-d.x)?p:d);
     }
@@ -779,10 +788,13 @@ function startDunk(){
   Object.assign(dunk,{on:true,t:0,x0:p.x,success:Math.random()<0.5,resolved:false,hang:0,wind:false,w0:0});
   p.ground=false; p.vy=0; needRelease=true; stats.att++; d.jumped=false;
   lastShot="Dunk attempt · 50% chance";
+  if(BOSS && sigReady("dunkblock")) fireSig();
 }
 function startCpuDunk(){
-  const wind=Math.random()<SKILL.windTry;   // the computer sometimes goes for a windmill too
-  Object.assign(cdunk,{on:true,t:0,x0:d.x,success:Math.random()<(wind?WIND_MAKE:SKILL.dunkMake),resolved:false,hang:0,wind,w0:0.06});
+  const wind=Math.random()<SKILL.windTry || !!(sig.on==="fast" && BOSS.sv.wind);   // the computer sometimes goes for a windmill too
+  const boost=(sig.on==="fast"||sig.on==="reb")?0.3:0;
+  Object.assign(cdunk,{on:true,t:0,x0:d.x,success:Math.random()<(wind?WIND_MAKE:SKILL.dunkMake)+boost,resolved:false,hang:0,wind,w0:0.06});
+  if(boost) endSig();
   d.ground=false; d.vy=0;
   lastShot=NAME.d+" is going for the dunk!";
 }
@@ -811,7 +823,7 @@ function resolveDunk(dk,e,dir,rim,dunkX){
   // the defender can stuff a dunk: the CPU has a small chance if it is close,
   // you get a bigger chance if you are in the air near the rim at the slam
   const stuffed = byP
-    ? (cpuOn && Math.abs(d.x-dunkX)<80 && Math.random()<SKILL.blockDunk)
+    ? (cpuOn && Math.abs(d.x-dunkX)<(sig.on==="dunkblock"?140:80) && Math.random()<(sig.on==="dunkblock"?1:SKILL.blockDunk))
     : (!p.ground && Math.abs(p.x-dunkX)<75 && Math.random()<0.5);
   if(stuffed){
     dk.hang=0.02; shakeT=0.15; owner=null; if(byP) stats.streak=0;
@@ -836,6 +848,15 @@ function setCpuPlan(){
   cpu.charging=false;
   cpu.dunk=Math.random()<SKILL.dunkTry;
   cpu.spot=cpu.dunk ? 115+Math.random()*40 : pickSpot();
+  if(BOSS){
+    if(sig.on==="shot" && sig.n>0){cpu.dunk=false; cpu.spot=sig.x;}   // Heat Check: the same spot again
+    else if(sigReady("shot")){
+      fireSig(); sig.n=BOSS.sv.repeat||1; sig.crossed=false; cpu.dunk=false; const sp=BOSS.sv.spot;
+      sig.x=sp==="mid"?300+Math.random()*80:(sp==="deep"?380+Math.random()*50:(sp==="far"?440+Math.random()*40:pickSpot()));
+      cpu.spot=sig.x;
+    }
+    else if(sigReady("fast")){fireSig(); cpu.dunk=true; cpu.spot=115+Math.random()*30; cpuBurst=3;}
+  }
 }
 function blocked(by,save){
   play("smack"); play("gasp");
@@ -852,6 +873,7 @@ function blocked(by,save){
     lastShot=(save?"You saved it from ":"You blocked ")+NAME.d; stats.blk++;
   }
   setMood(by===d?p:d,"shock"); setMood(by,"happy"); celebrateFor(by);
+  if(by===d && sig.on==="block"){ if(BOSS.sv.catch) takeBall(d); endSig(); }   // Freeze: he catches it
 }
 function arrive(t){
   const byP=ball.shooter===p, rim=byP?RR:RL;
@@ -886,6 +908,7 @@ function arrive(t){
 }
 function missNow(){
   const byP=ball.shooter===p;
+  if(BOSS && sigReady("reb") && (!BOSS.sv.dunk || !byP)) fireSig();
   ball.state="free"; ball.timer=0; ball.live=true;
   {
     if(byP){
@@ -901,22 +924,28 @@ function missNow(){
 }
 
 // a defender jump; about 1 in 3 of them turns into a double jump at the top
-function cpuJump(v){d.vy=v; d.ground=false; d.dbl=false; d.willDbl=Math.random()<SKILL.dblChance;}
+function cpuJump(v){
+  if(BOSS){ v*=BS.jump; if(cpuDefending() && sigReady("leap")) fireSig(); if(sig.on==="leap") v*=1.3; }
+  d.vy=v; d.ground=false; d.dbl=false;
+  d.willDbl=Math.random()<SKILL.dblChance || !!(BOSS && BOSS.sv.dbl && (sig.on==="leap"||sig.on==="block"));
+}
 function cpuUpdate(dt){
   if(tip.on){ updateTip(dt); body(d,dt); return; }
   if(cdunk.on){ runDunk(cdunk,d,-1,RL,CPU_DUNK_X,dt); return; }
   if(owner===d && ball.state==="held"){
     // attacking the left hoop
+    if(BOSS) bossAttack(dt);
     if(!cpu.charging){
-      const step=SKILL.atkSpeed*dt;
+      const step=SKILL.atkSpeed*dt*(cpuBurst>0?1.7:1);
       if(Math.abs(cpu.spot-d.x)<=step){
         d.x=cpu.spot;
         if(cpu.dunk && d.ground){ startCpuDunk(); return; }
-        cpu.charging=true; cpu.t=0; cpu.hold=0.9+Math.random()*0.5;
-        cpu.fade = p.x<d.x && d.x-p.x<75 && Math.random()<SKILL.fadeChance;
+        cpu.charging=true; cpu.t=0; cpu.hold=(0.9+Math.random()*0.5)*(BOSS?BS.hold*((sig.on==="shot"&&BOSS.sv.quick)?0.5:1):1);
+        cpu.fade = (p.x<d.x && d.x-p.x<75 && Math.random()<SKILL.fadeChance) || !!(sig.on==="shot" && BOSS.sv.fade);
+        if(sig.on==="shot" && BOSS.sv.cross && !sig.crossed){sig.crossed=true; crossover();}
       } else d.x+=Math.sign(cpu.spot-d.x)*step;
     } else {
-      cpu.t+=dt; if(cpu.fade) d.x=Math.min(d.x+40*dt,800);
+      cpu.t+=dt; if(cpu.fade) d.x=Math.min(d.x+(40+(BOSS?BS.fade*150:0))*dt,800);
       if(cpu.t>=cpu.hold) cpuRelease();
     }
   } else if(ball.state==="flight" && ball.shooter===p){
@@ -926,12 +955,13 @@ function cpuUpdate(dt){
       ball.saveTried=true; if(Math.random()<SKILL.saveChance) cpuJump(-380);
     }
   } else if(ball.state==="free"){
-    const step=SKILL.chaseSpeed*dt;
+    const step=SKILL.chaseSpeed*dt*(BOSS?(1+BS.reb*2)*(sig.on==="reb"?2.4:1):1);
     if(Math.abs(ball.x-d.x)>step) d.x+=Math.sign(ball.x-d.x)*step;
   } else if(owner===p && ball.state==="held"){
     // defending the right hoop
-    const target=clamp(p.x+60,60,800), step=SKILL.defSpeed*dt;
-    if(Math.abs(target-d.x)<step) d.x=target; else d.x+=Math.sign(target-d.x)*step;
+    let target=clamp(p.x+60-(BOSS?BS.glue*60:0),60,800), step=SKILL.defSpeed*dt;
+    if(sig.on==="dunkblock"){target=DUNK_X+24; step*=2.5;}
+    if(!(BOSS && bossDefend(dt))){ if(Math.abs(target-d.x)<step) d.x=target; else d.x+=Math.sign(target-d.x)*step; }
     const close=d.x>p.x && d.x-p.x<110;
     // contest a dunk by jumping with it
     if(dunk.on && !d.jumped && d.ground && Math.abs(d.x-DUNK_X)<90 && dunk.t>0.08){cpuJump(-400);d.jumped=true;}
@@ -943,7 +973,7 @@ function cpuUpdate(dt){
   }
   // random double jump at the top of a block jump
   if(!d.ground && d.willDbl && !d.dbl && cpuDefending() && Math.abs(d.vy)<APEX_VY){
-    d.vy=-380; d.dbl=true; cpuFx={t:0.45,x:d.x,y:d.y};
+    d.vy=-380*(BOSS?BS.jump:1); d.dbl=true; cpuFx={t:0.45,x:d.x,y:d.y};
   }
   d.lean+=(((cpu.charging&&cpu.fade)?0.25:0)-d.lean)*Math.min(1,dt*12);
   body(d,dt);
@@ -1241,6 +1271,7 @@ function applyLooks(){
   LOOK.d=kitLook(BOYS[o],kits[o],-1); LOOK.d.who="d";
   C.p1=MAINS[kits[human].main]; C.p2=MAINS[kits[o].main];
   NAME.p=BOYS[human].name; NAME.d=BOYS[o].name;
+  if(BOSS){const i=BOSSES.indexOf(BOSS); LOOK.d=bossLook(i,C.p1); C.p2=LOOK.d.jersey; NAME.d=BOSS.name;}
   refreshManga("zackie"); refreshManga("keelan");
 }
 const SAVE_KEY="hoops4life";
@@ -1261,11 +1292,15 @@ function saveGame(){try{localStorage.setItem(SAVE_KEY,JSON.stringify({kits,human
 // ---------- screens: title, setup, play, pause, game over ----------
 let screen="title", mode="vs", overWinner="p", ui=[];
 function startGame(){
+  const lv=Math.floor(level/STOPS);
+  BOSS=(mode==="level" && isBossLevel(level)) ? BOSSES[lv] : null;
+  BS=BOSS ? bossStats(lv) : null;
   applyLooks();
   Object.assign(stats,{score:0,cpu:0,made:0,att:0,streak:0,best:0,threes:0,dunks:0,blk:0,stl:0});
   stealCool=0; stealSwipe=0; stealMsg.t=0; prevAction=true; boardFx.t=0; crackFx.t=0;
-  if(mode==="level"){SKILL=levelSkill(level); WIN=levelTarget(level);}
+  if(mode==="level"){SKILL=levelSkill(level); WIN=levelTarget(level); if(BOSS) SKILL=bossSkill(SKILL,lv);}
   else {SKILL=Object.assign({},SKILL_BASE); WIN=21;}
+  resetBoss();
   cpuOn = mode!=="practice";
   pendingInbound=null; gameOverT=0; celebrate.t=0; charge.shown=0; dblFx.t=0; cpuFx.t=0;
   moods.p.m=moods.d.m="happy"; moods.p.t=moods.d.t=0;
@@ -1284,11 +1319,13 @@ function endGame(){
     progress[human]=Math.min(LEVELS,level+1);
     newRoad = progress[human]<LEVELS && progress[human]%STOPS===0;
   }
+  // lose to a boss: back to game 6, win it again to get another shot at him
+  if(mode==="level" && !youWin && BOSS && level>=progress[human]) progress[human]=level-1;
   saveGame(); screen="over";
 }
 function openSetup(m){mode=m; screen="setup";}
-function tryStart(){ if(mode!=="practice" && kits.zackie.main===kits.keelan.main) return; saveGame(); startGame(); }
-function toMap(){screen="title"; mapScroll=null;}
+function tryStart(){ if(mode!=="practice" && !(mode==="level"&&isBossLevel(level)) && kits.zackie.main===kits.keelan.main) return; saveGame(); startGame(); }
+function toMap(){screen="title"; mapScroll=null; BOSS=null; applyLooks();}
 function button(x,y,w,h,label,o,fn){
   o=o||{};
   ctx.globalAlpha=o.disabled?0.45:1;
@@ -1364,12 +1401,213 @@ function mapMaxScroll(){return Math.max(0,mapContentH()-VIEW.h);}
 const LEVELS=ROADS.length*STOPS;
 let progress={zackie:0,keelan:0}, level=0, newRoad=false;   // progress = how many levels that boy has beaten
 function levelName(n){return "Level "+(Math.floor(n/STOPS)+1)+" · Game "+(n%STOPS+1);}
-function levelTarget(n){const lv=Math.floor(n/STOPS); return lv<10?11:(lv<20?15:21);}   // longer games in later levels
+function levelTarget(n){return 21;}   // every game is first to 21
 function levelSkill(n){
   const t=n/(LEVELS-1), L=(a,b)=>a+(b-a)*t;   // level 1 = easiest, last level = hardest
   return {acc:L(0.6,1.25), noReact:L(0.5,0.06), timingNoise:L(0.6,0.16), defSpeed:L(115,195), chaseSpeed:L(135,210),
     atkSpeed:L(100,165), fadeChance:L(0.25,0.85), dunkTry:L(0.08,0.45), dunkMake:L(0.38,0.62), blockDunk:L(0.08,0.42),
     dblChance:L(0.05,0.5), stealChance:L(0.6,0.3), saveChance:L(0.08,0.45), windTry:L(0.1,0.4)};
+}
+// ---------- bosses: game 7 of every level is a boss with his own abilities and a signature move ----------
+const ABIL={speed:"Speedster",hops:"Sky Hopper",giant:"Giant",arms:"Long Arms",sharp:"Sharpshooter",deep:"Deep Range",
+  quick:"Quick Release",block:"Shot Blocker",dbl:"Double Jumper",glue:"Glue Defender",pick:"Pickpocket",
+  ankle:"Ankle Breaker",dunk:"Dunk Master",fade:"Fade-Away King",reb:"Rebounder"};
+// sk = which kind of signature move, sv = how that boss does it
+const BOSSES=[
+  {name:"Big Benny",ab:["giant"],sig:"Skyscraper Block",sk:"block",sv:{}},
+  {name:"Captain Quickstep",ab:["speed"],sig:"Fast Break",sk:"fast",sv:{}},
+  {name:"Blaze",ab:["sharp"],sig:"Heat Check",sk:"shot",sv:{repeat:3,spot:"mid"}},
+  {name:"Peak Pete",ab:["hops"],sig:"Mountain Leap",sk:"leap",sv:{}},
+  {name:"Sparky",ab:["quick"],sig:"Lightning Shot",sk:"shot",sv:{quick:true}},
+  {name:"The Duke",ab:["glue"],sig:"Royal Guard",sk:"guard",sv:{}},
+  {name:"Nova",ab:["arms"],sig:"Northern Reach",sk:"block",sv:{reach:true}},
+  {name:"Comet Carl",ab:["ankle"],sig:"Comet Crossover",sk:"cross",sv:{}},
+  {name:"Sunny Swipes",ab:["pick"],sig:"Early Bird",sk:"steal",sv:{}},
+  {name:"The Iceberg",ab:["block"],sig:"Freeze",sk:"block",sv:{catch:true}},
+  {name:"Timber",ab:["giant","reb"],sig:"Tall Tree",sk:"reb",sv:{}},
+  {name:"Iron Max",ab:["glue","arms"],sig:"Steel Trap",sk:"guard",sv:{steal:true}},
+  {name:"Astro",ab:["hops","dbl"],sig:"Moonwalk",sk:"leap",sv:{dbl:true}},
+  {name:"Falcon",ab:["speed","dunk"],sig:"Dive Bomb",sk:"fast",sv:{}},
+  {name:"Splash",ab:["deep","quick"],sig:"Cannonball",sk:"shot",sv:{spot:"deep",quick:true}},
+  {name:"Rockslide",ab:["giant","block"],sig:"Landslide",sk:"block",sv:{}},
+  {name:"Flicker",ab:["ankle","pick"],sig:"Lights Out",sk:"cross",sv:{thenSteal:true}},
+  {name:"Shadow",ab:["speed","pick"],sig:"Vanish",sk:"steal",sv:{}},
+  {name:"Thunder",ab:["hops","dunk"],sig:"Thunderclap",sk:"fast",sv:{wind:true}},
+  {name:"Prism",ab:["sharp","fade"],sig:"Rainbow Fade",sk:"shot",sv:{fade:true}},
+  {name:"Magma",ab:["giant","dunk","reb"],sig:"Eruption",sk:"reb",sv:{dunk:true}},
+  {name:"Orbit",ab:["arms","dbl","block"],sig:"Gravity",sk:"block",sv:{dbl:true}},
+  {name:"King Crusher",ab:["speed","glue","pick"],sig:"Crown Grab",sk:"steal",sv:{fast:true}},
+  {name:"Tsunami",ab:["sharp","deep","quick"],sig:"Tidal Wave",sk:"shot",sv:{spot:"far"}},
+  {name:"Bullseye",ab:["sharp","fade","ankle"],sig:"Arrow Step",sk:"shot",sv:{cross:true,fade:true}},
+  {name:"Solar Flare",ab:["speed","hops","dunk"],sig:"Supernova",sk:"fast",sv:{wind:true}},
+  {name:"The Wall",ab:["giant","arms","glue"],sig:"Drawbridge",sk:"guard",sv:{}},
+  {name:"Stardust",ab:["deep","quick","ankle"],sig:"Shooting Star",sk:"shot",sv:{cross:true,spot:"deep",quick:true}},
+  {name:"Titan",ab:["giant","block","reb"],sig:"Titan Swat",sk:"dunkblock",sv:{}},
+  {name:"The Legend",ab:["speed","hops","arms","sharp","pick"],sig:"Legend Mode",sk:"legend",sv:{}}
+];
+const SIG_INFO={block:"blocks your next shot",fast:"sprints in for a dunk",shot:"a shot that almost always goes in",
+  leap:"a giant jump",guard:"won't let you past",cross:"crosses you over",steal:"steals the ball",
+  reb:"grabs the rebound",dunkblock:"blocks your dunk",legend:"gets even stronger at the end"};
+const BOSS_SKIN=[["#F2C6A8","#D9A285"],["#E8B48F","#C99470"],["#C68B5E","#A56E44"],["#A86E45","#875532"],["#7A4B2E","#5E3820"],["#5A3622","#432616"]];
+const BOSS_HAIR=[["#1E1A18","#4A403A"],["#3B2A1E","#6A5240"],["#6B4A32","#9A7556"],["#C9A15A","#E6C784"],["#B5462A","#D9774F"],["#2A2A2A","#555555"],["#E8E4DA","#FFFFFF"]];
+const BOSS_EYE=["#3A2A1E","#5A3A22","#4F6B3A","#3D5A80","#2A1E14"];
+let BOSS=null, BS=null;
+const isBossLevel=n=>n%STOPS===STOPS-1;
+function bossTier(i){return i<10?1:(i<20?2:(i<29?3:4));}
+function bossLook(i,avoid){
+  const a=ARENAS[i], b=BOSSES[i], sk=BOSS_SKIN[(i*7+3)%6], hr=BOSS_HAIR[(i*5+1)%7];
+  const dist=(x,y)=>{const A=hex2rgb(x),B=hex2rgb(y);return Math.hypot(A[0]-B[0],A[1]-B[1],A[2]-B[2]);};
+  let jersey=a.p, trim=a.s;
+  if(avoid && dist(jersey,avoid)<110){jersey=a.s; trim=a.p;}
+  if(dist(jersey,trim)<90) trim=inkOn(jersey);
+  return {who:"d",dir:-1,name:b.name,num:String(i+1),skin:sk[0],skinDark:sk[1],hair:hr[0],hairHi:hr[1],brow:mix(hr[0],"#000000",0.3),
+    eye:BOSS_EYE[i%5],style:i%2?"quiff":"crop",gapTeeth:i%4===2,bigEars:i%3===0,
+    jersey,trim,shorts:mix(jersey,"#000000",0.18),numCol:trim,shoe:trim==="#FFFFFF"?"#1B2340":"#FFFFFF",sole:"#1B2340",sock:"#FFFFFF",band:trim,
+    armL:b.ab.includes("arms")?1.25:1, size:b.ab.includes("giant")?1.2+0.04*bossTier(i):1};
+}
+// turn the boss's abilities into numbers the game uses
+function bossStats(i){
+  const b=BOSSES[i], t=bossTier(i), s=[0,0.15,0.25,0.35,0.45][t], has=k=>b.ab.includes(k);
+  return {s, size:has("giant")?1.2+0.04*t:1, arm:has("arms")?1.18+0.06*t:1, jump:has("hops")?Math.sqrt(1+s*2):1,
+    hold:has("quick")?Math.max(0.4,1-s*1.4):1, blockR:has("block")?18+s*22:18, deep:has("deep")?s:0, glue:has("glue")?s:0,
+    pick:has("pick")?s:0, ankle:has("ankle")?s:0, fade:has("fade")?s:0, reb:has("reb")?s:0, speed:has("speed")?Math.min(1.45,1+s+0.1):1};
+}
+function bossSkill(sk,i){
+  const b=BOSSES[i], s=BS.s, has=k=>b.ab.includes(k);
+  if(has("speed")) for(const k of ["atkSpeed","defSpeed","chaseSpeed"]) sk[k]*=BS.speed;
+  if(has("sharp")) sk.acc*=1+s*1.3;
+  if(has("block")){sk.noReact*=0.3; sk.timingNoise*=Math.max(0.3,1-s*1.5); sk.saveChance=Math.min(0.9,sk.saveChance+s*1.2); sk.blockDunk=Math.min(0.85,sk.blockDunk+s);}
+  if(has("dbl")) sk.dblChance=0.92;
+  if(has("glue")) sk.defSpeed*=1+s*1.5;
+  if(has("dunk")){sk.dunkTry=Math.min(0.8,sk.dunkTry+s*1.6); sk.dunkMake=Math.min(0.85,sk.dunkMake+s); sk.windTry=Math.min(0.8,sk.windTry+s);}
+  if(has("fade")) sk.fadeChance=0.95;
+  if(has("pick")) sk.stealChance*=Math.max(0.5,1-s);   // he protects the ball better too
+  return sk;
+}
+// boss moves and signature moves
+let sig={wait:12,on:null,t:0,flash:0,n:0,x:0,next:null}, bossStealCool=0, ankleCool=0, pStun=0, cpuBurst=0, cpuSwipe=0, legendOn=false;
+function resetBoss(){sig={wait:10+Math.random()*6,on:null,t:0,flash:0,n:0,x:0,next:null}; bossStealCool=2; ankleCool=2; pStun=0; cpuBurst=0; cpuSwipe=0; legendOn=false;}
+function sigKind(){return sig.next||(BOSS&&BOSS.sk);}
+function sigReady(k){return BOSS && !sig.on && (sig.wait<=0||sig.next===k) && sigKind()===k && gameOverT<=0 && !tip.on;}
+function fireSig(){sig.on=sigKind(); sig.next=null; sig.t=0; sig.flash=2.4; sig.stole=false; sig.wait=18+Math.random()*12; play("cheer",0.75); setMood(d,"happy",2);}
+function endSig(){sig.on=null;}
+function bossTick(dt){
+  if(!BOSS) return;
+  if(sig.wait>0) sig.wait-=dt;
+  if(sig.flash>0) sig.flash-=dt;
+  if(sig.on) sig.t+=dt;
+  if(bossStealCool>0) bossStealCool-=dt;
+  if(ankleCool>0) ankleCool-=dt;
+  if(pStun>0) pStun-=dt;
+  if(cpuBurst>0) cpuBurst-=dt;
+  if(cpuSwipe>0) cpuSwipe-=dt;
+  // a signature move that can't happen right now times out
+  const lim={block:4,dunkblock:3,fast:5,shot:40,leap:2.5,guard:3,steal:1.8,reb:3.5,cross:0.1,legend:2.8}[sig.on];
+  if(sig.on && sig.t>lim) endSig();
+  if(sig.on==="leap" && d.ground && sig.t>0.25) endSig();
+  // The Legend: everything gets stronger for the last 5 points
+  if(BOSS.sk==="legend" && !legendOn && (stats.cpu>=WIN-5||stats.score>=WIN-5)){
+    legendOn=true; sig.next=null; sig.on="legend"; sig.t=0; sig.flash=2.8; play("cheer",1.4);
+    for(const k of ["atkSpeed","defSpeed","chaseSpeed"]) SKILL[k]*=1.15;
+    SKILL.acc*=1.15; BS.jump*=1.08; BS.arm*=1.08; BS.pick+=0.1;
+  }
+}
+function bossSteal(sure){
+  bossStealCool=1.4; cpuSwipe=0.3; play("swipe");
+  if(sure || Math.random()<BS.pick*1.4){
+    owner=d; ball.state="held"; ball.live=false; charge.on=false; needRelease=true;
+    say("STOLEN!",NAME.d+" picked your pocket!",C.warn); play("gasp");
+    setMood(p,"shock"); setMood(d,"happy"); lastShot="Stolen by "+NAME.d;
+    setCpuPlan();
+    if(sig.on==="steal" && BOSS.sv.fast){cpu.dunk=true; cpu.spot=115+Math.random()*30; cpuBurst=2;}
+    if(sig.on==="steal") endSig();
+    return true;
+  }
+  lastShot=NAME.d+" swiped at the ball and missed"; return false;
+}
+function crossover(){
+  ankleCool=3.5; pStun=0.55+Math.max(BS.ankle,0.2); cpuBurst=0.9;
+  if(cpu.spot>p.x-40) cpu.spot=clamp(p.x-70,115,cpu.spot);   // drive past him
+  say("ANKLES BROKEN!",NAME.d+" crossed you over!",C.warn); play("squeak"); play("gasp");
+  setMood(p,"shock"); setMood(d,"happy");
+}
+// called from the computer's update: the boss's extra moves
+function bossAttack(dt){   // he has the ball
+  if(cpu.charging) return;
+  const close=p.x<d.x && d.x-p.x<110;
+  if(close && sigReady("cross")){fireSig(); crossover(); if(BOSS.sv.thenSteal) sig.next="steal"; sig.wait=Math.max(sig.wait,4); endSig(); return;}
+  if(BS.ankle && close && ankleCool<=0 && Math.random()<dt*(0.5+BS.ankle*2)) crossover();
+}
+function bossDefend(dt){   // you have the ball
+  const gap=Math.abs(d.x-p.x);
+  if(!charge.on && !dunk.on && p.ground && gap<260 && sigReady("steal")) fireSig();
+  if(sig.on==="steal"){
+    const target=p.x+18, step=SKILL.defSpeed*3*dt;
+    d.x+=Math.abs(target-d.x)<step?target-d.x:Math.sign(target-d.x)*step;
+    if(Math.abs(d.x-p.x)<STEAL_REACH && !charge.on && !dunk.on){bossSteal(true);}
+    return true;
+  }
+  if(gap<140 && sigReady("guard")) fireSig();
+  if(sig.on==="guard"){
+    const target=p.x+34, step=SKILL.defSpeed*2.2*dt;
+    d.x+=Math.abs(target-d.x)<step?target-d.x:Math.sign(target-d.x)*step;
+    if(BOSS.sv.steal && sig.t>1 && !sig.stole && !charge.on && !dunk.on){sig.stole=true; if(Math.random()<0.7) bossSteal(true); else bossSteal(false);}
+    if(sig.t>3) endSig();
+    return true;
+  }
+  if(BS.pick && bossStealCool<=0 && !charge.on && !dunk.on && p.ground && gap<STEAL_REACH*BS.arm+6 && Math.random()<dt*2.2) bossSteal(false);
+  return false;
+}
+// how fast the player can move: frozen after a crossover, slowed when a glue defender is in the way
+function playerSpeedK(joy){
+  if(!BOSS) return 1;
+  if(pStun>0) return 0;
+  const inWay=owner===p && d.ground && d.x>p.x && d.x-p.x<46 && joy>0;
+  if(inWay && sig.on==="guard") return 0.12;
+  if(inWay && BS.glue) return Math.max(0.25,1-BS.glue*2);
+  return 1;
+}
+function drawSigFlash(){
+  if(!BOSS || sig.flash<=0) return;
+  const a=Math.min(1,sig.flash*2.5, (2.4-sig.flash+0.2)*6);
+  ctx.save(); ctx.globalAlpha=Math.max(0,a);
+  const t1=NAME.d.toUpperCase(), t2=(BOSS.sig+"!").toUpperCase();
+  ctx.font=DISP(22); const w=Math.max(ctx.measureText(t2).width,180)+50;
+  ctx.fillStyle="rgba(16,21,43,0.94)"; rr(W/2-w/2,62,w,58,14); ctx.fill();
+  ctx.strokeStyle=C.p2; ctx.lineWidth=4; ctx.stroke();
+  drawCrown(W/2,63,13);
+  text(t1+" · SIGNATURE MOVE",W/2,77,BODY(11,900),C.muted,"center");
+  text(t2,W/2,101,DISP(22),C.warn,"center");
+  ctx.restore();
+}
+function drawCrown(x,y,s){   // a little gold crown sitting on a point
+  ctx.save(); ctx.translate(x,y); ctx.fillStyle="#FFC93C"; ctx.strokeStyle="#7A4A00"; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(-s,-0); ctx.lineTo(-s,-s*0.9); ctx.lineTo(-s*0.5,-s*0.4); ctx.lineTo(0,-s*1.1); ctx.lineTo(s*0.5,-s*0.4); ctx.lineTo(s,-s*0.9); ctx.lineTo(s,0); ctx.closePath();
+  ctx.fill(); ctx.stroke(); ctx.restore();
+}
+function bossCard(i,x,y,w,h){
+  const b=BOSSES[i], lk=bossLook(i,MAINS[kits[human].main]);
+  ctx.fillStyle="rgba(27,35,64,0.97)"; rr(x,y,w,h,18); ctx.fill();
+  ctx.strokeStyle=lk.jersey; ctx.lineWidth=4; ctx.stroke();
+  ctx.save(); rr(x,y,w,h,18); ctx.clip();
+  ctx.fillStyle=lk.jersey; ctx.globalAlpha=0.22; ctx.beginPath(); ctx.arc(x+80,y+h-60,80,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1;
+  const k=1.95*Math.min(lk.size,1.2); ctx.translate(x+80,y+h-12); ctx.scale(k,k);
+  drawAthlete({x:0,y:0,lean:0,spd:0,run:0},Object.assign({},lk,{dir:1}),{x:14*lk.armL,y:-34},{x:-12,y:-26},false,false);
+  ctx.restore();
+  ctx.fillStyle=C.warn; rr(x+12,y+12,84,24,12); ctx.fill(); text("BOSS",x+54,y+24,BODY(12,900),C.navy,"center");
+  drawCrown(x+105,y+30,9);
+  const tx=x+160; let fs=24; ctx.font=DISP(fs); while(fs>14 && ctx.measureText(b.name.toUpperCase()).width>w-176){fs-=2; ctx.font=DISP(fs);}
+  text(b.name.toUpperCase(),tx,y+30,DISP(fs),C.ink);
+  text("ABILITIES",tx,y+62,BODY(12,900),C.muted);
+  b.ab.forEach((a,j)=>{const cx=tx+(j%2)*112, cy=y+84+Math.floor(j/2)*28;
+    ctx.fillStyle=mix(lk.jersey,"#1B2340",0.35); rr(cx,cy-11,106,22,11); ctx.fill();
+    let f=11; ctx.font=BODY(f,900); while(f>8 && ctx.measureText(ABIL[a]).width>98){f--; ctx.font=BODY(f,900);}
+    text(ABIL[a],cx+53,cy,BODY(f,900),C.ink,"center");});
+  const sy=y+84+Math.ceil(b.ab.length/2)*28+10;
+  text("SIGNATURE MOVE",tx,sy,BODY(12,900),C.muted);
+  text(b.sig,tx,sy+22,DISP(16),C.warn);
+  text(SIG_INFO[b.sk],tx,sy+42,BODY(12,800),C.ink);
+  text("Beat him to finish Level "+(i+1),tx,y+h-22,BODY(12,800),C.muted);
 }
 let pickByPlayer=false;   // true when the level comes from the 1 v 1 button, so either boy can pick up his own next level
 function openLevel(n,byPlayer){level=n; mode="level"; screen="setup"; pickByPlayer=!!byPlayer;}
@@ -1473,11 +1711,14 @@ function drawRoadMap(){
     }
     // the levels
     for(let i=0;i<STOPS;i++){
-      const sp=stopPos(r,i), n=r*STOPS+i, done=n<prog, cur=n===prog, R=cur?STOP_R*1.1:STOP_R;
+      const sp=stopPos(r,i), n=r*STOPS+i, done=n<prog, cur=n===prog, boss=i===STOPS-1, R=(cur?STOP_R*1.1:STOP_R)*(boss?1.25:1);
       if(cur){ctx.strokeStyle=C.warn; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(sp.x,sp.y,(STOP_R+7)*pulse,0,Math.PI*2); ctx.stroke();}
       ctx.fillStyle=(done||cur)?road.col:locked; ctx.beginPath(); ctx.arc(sp.x,sp.y,R,0,Math.PI*2); ctx.fill();
       ctx.strokeStyle=(done||cur)?C.ink:"rgba(255,255,255,0.35)"; ctx.lineWidth=3; ctx.stroke();
-      text(String(i+1),sp.x,sp.y+1,DISP(18),(done||cur)?inkOn(road.col):"rgba(255,255,255,0.45)","center");
+      if(boss){ faceBadge(bossLook(r,MAINS[kits[human].main]),sp.x,sp.y,R-3,(done||cur)?road.col:locked);
+        if(!(done||cur)){ctx.fillStyle="rgba(16,21,43,0.55)"; ctx.beginPath(); ctx.arc(sp.x,sp.y,R-3,0,Math.PI*2); ctx.fill();}
+        drawCrown(sp.x,sp.y-R+2,10); }
+      else text(String(i+1),sp.x,sp.y+1,DISP(18),(done||cur)?inkOn(road.col):"rgba(255,255,255,0.45)","center");
       if(done){ // gold tick badge for a beaten level
         ctx.fillStyle=C.warn; ctx.beginPath(); ctx.arc(sp.x+15,sp.y-14,8,0,Math.PI*2); ctx.fill();
         ctx.strokeStyle=C.navy; ctx.lineWidth=2.4; ctx.beginPath(); ctx.moveTo(sp.x+11,sp.y-14); ctx.lineTo(sp.x+14,sp.y-11); ctx.lineTo(sp.x+19,sp.y-17); ctx.stroke();
@@ -1487,8 +1728,9 @@ function drawRoadMap(){
       }
       if(cur){const left=sp.x>MAP.x+MAP.w/2, tx=sp.x+(left?-1:1)*(R+12);
         ctx.font=DISP(13); ctx.textAlign=left?"right":"left"; ctx.textBaseline="middle";
-        ctx.lineWidth=4; ctx.lineJoin="round"; ctx.strokeStyle=C.navy; ctx.strokeText("PLAY",tx,sp.y+1);
-        ctx.fillStyle=C.warn; ctx.fillText("PLAY",tx,sp.y+1);}
+        const lab=boss?"BOSS!":"PLAY";
+        ctx.lineWidth=4; ctx.lineJoin="round"; ctx.strokeStyle=C.navy; ctx.strokeText(lab,tx,sp.y+1);
+        ctx.fillStyle=C.warn; ctx.fillText(lab,tx,sp.y+1);}
     }
   });
   ctx.restore();
@@ -1521,7 +1763,7 @@ function drawTitle(){
   button(bx,150,bw,50,"SHOOTING PRACTICE",{fill:"#F26B1D",ink:C.navy,sub:"No defender"},()=>openSetup("practice"));
   button(bx,208,bw,42,"TABLE MODE",{disabled:true,sub:"2 players, 1 phone · coming soon"});
   button(bx,258,bw,42,"TWO PHONES",{disabled:true,sub:"2 players over Wi-Fi · coming soon"});
-  const at=b=>progress[b]>=LEVELS?"done!":"L"+(Math.floor(progress[b]/STOPS)+1)+" · P"+(progress[b]%STOPS+1);
+  const at=b=>progress[b]>=LEVELS?"done!":"L"+(Math.floor(progress[b]/STOPS)+1)+" · G"+(progress[b]%STOPS+1);
   text("WHERE EACH BOY IS UP TO",cx,326,BODY(11,900),C.muted,"center");
   text(BOYS.zackie.name+"  "+at("zackie")+"     "+BOYS.keelan.name+"  "+at("keelan"),cx,346,BODY(15,900),C.ink,"center");
   button(cx-60,358,120,26,SND.on?"SOUND ON":"SOUND OFF",{size:12,outline:"rgba(255,255,255,0.3)"},toggleSound);
@@ -1576,12 +1818,18 @@ function drawSetup(){
   ui=[]; drawCourt(); shade(0.8);
   const heads={vs:["WHO'S PLAYING?","Tap a card to play as him. The other one is the computer. Pick jersey and trim colours."],
     practice:["WHO'S PRACTISING?","Tap a card to pick who practises, and choose the kit."],
-    level:[levelName(level).toUpperCase(),BOYS[human].name+" vs the computer at "+ARENAS[Math.floor(level/STOPS)].name+" · first to "+levelTarget(level)+(pickByPlayer?" · tap a card to choose who plays":"")]};
+    level:[levelName(level).toUpperCase()+(isBossLevel(level)?" · BOSS GAME":""),isBossLevel(level)?BOYS[human].name+" vs "+BOSSES[Math.floor(level/STOPS)].name+" at "+ARENAS[Math.floor(level/STOPS)].name+" · first to "+levelTarget(level):BOYS[human].name+" vs the computer at "+ARENAS[Math.floor(level/STOPS)].name+" · first to "+levelTarget(level)+(pickByPlayer?" · tap a card to choose who plays":"")]};
   text(heads[mode][0],W/2,26,DISP(22),C.warn,"center");
   text(heads[mode][1],W/2,47,BODY(13,800),C.muted,"center");
+  if(mode==="level" && isBossLevel(level)){
+    playerCard(human,22,62,390,262);
+    bossCard(Math.floor(level/STOPS),432,62,390,262);
+    if(pickByPlayer) button(W/2-95,336,190,42,"PLAY AS "+BOYS[other()].name.toUpperCase(),{size:13,outline:"rgba(255,255,255,0.3)"},()=>{human=other(); level=Math.min(progress[human],LEVELS-1);});
+  } else {
   playerCard("zackie",22,62,390,262);
   playerCard("keelan",432,62,390,262);
-  const clash=mode!=="practice" && kits.zackie.main===kits.keelan.main;
+  }
+  const clash=mode!=="practice" && !(mode==="level"&&isBossLevel(level)) && kits.zackie.main===kits.keelan.main;
   button(22,336,130,42,"BACK",{},toMap);
   if(clash) text("Pick different jersey colours",W/2,357,BODY(14,900),C.warn,"center");
   button(W-22-210,336,210,42,"START",{fill:"#F26B1D",ink:C.navy,disabled:clash},tryStart);
@@ -1601,14 +1849,15 @@ function toggleSound(){SND.on=!SND.on; saveGame();
 function drawOver(){
   ui=[]; shade(0.84);
   const youWin=overWinner==="p", boy=youWin?human:other();
-  portraitBadge(boy,180,186,112);
+  if(!youWin && BOSS){faceBadge(LOOK.d,180,186,112,C.p2); drawCrown(180,72,22);} else portraitBadge(boy,180,186,112);
   let size=40; ctx.font=DISP(size);
   const lv=mode==="level", allDone=lv && youWin && level===LEVELS-1;
   const head=allDone?"ALL 30 LEVELS DONE!":(lv&&youWin?(level%STOPS===STOPS-1?"LEVEL "+(Math.floor(level/STOPS)+1)+" COMPLETE!":"GAME "+(level%STOPS+1)+" WON!"):(youWin?NAME.p:NAME.d).toUpperCase()+" WINS!");
   while(size>24 && ctx.measureText(head).width>470){size-=2; ctx.font=DISP(size);}
   bigTitle(head,330,62,size,"left");
   text(NAME.p+"  "+stats.score+"  –  "+stats.cpu+"  "+NAME.d,332,104,BODY(20,900),C.ink);
-  if(lv) text(levelName(level).toUpperCase()+(newRoad?"   ·   LEVEL "+(Math.floor(progress[human]/STOPS)+1)+" OPEN + NEW BALL!":""),332,140,BODY(12,900),newRoad?C.warn:C.muted);
+  if(lv && BOSS && !youWin) text("BOSS WINS · WIN GAME 6 AGAIN FOR ANOTHER SHOT AT "+BOSS.name.toUpperCase(),332,140,BODY(12,900),C.warn);
+  else if(lv) text((BOSS&&youWin?"BOSS BEATEN!   ·   ":"")+levelName(level).toUpperCase()+(newRoad?"   ·   LEVEL "+(Math.floor(progress[human]/STOPS)+1)+" OPEN + NEW BALL!":""),332,140,BODY(12,900),newRoad||BOSS?C.warn:C.muted);
   else text(NAME.p.toUpperCase()+"'S GAME",332,140,BODY(12,900),C.muted);
   const rows=[["Shots made",stats.made+" / "+stats.att],["3-pointers",String(stats.threes)],["Dunks",String(stats.dunks)],
     ["Blocks",String(stats.blk)],["Best streak",String(stats.best)],["Steals",String(stats.stl)]];
@@ -1617,6 +1866,7 @@ function drawOver(){
     text(l,cx+12,cy+1,BODY(14,800),C.muted); text(v,cx+212,cy+2,DISP(16),C.ink,"right");});
   if(lv){
     if(youWin && level<LEVELS-1) button(332,312,220,50,(level+1)%STOPS===0?"NEXT LEVEL":"NEXT GAME",{fill:"#F26B1D",ink:C.navy,sub:levelName(level+1)},()=>{level++; startGame();});
+    else if(BOSS && !youWin) button(332,312,220,50,"PLAY GAME 6",{fill:"#F26B1D",ink:C.navy,sub:levelName(level-1)},()=>{level--; startGame();});
     else button(332,312,220,50,youWin?"PLAY AGAIN":"TRY AGAIN",{fill:"#F26B1D",ink:C.navy},()=>startGame());
     button(564,312,140,50,"MAP",{outline:"rgba(255,255,255,0.3)"},toMap);
   } else {
@@ -1651,7 +1901,8 @@ function drawAthlete(e,lk,hand,other,air,hang){
   const hipF={x:dir*4,y:-26}, hipB={x:-dir*3,y:-26};
   const shF={x:dir*6,y:-47}, shB={x:-dir*6,y:-47};
   // back arm and back leg sit behind the body
-  limb(shB.x,shB.y,other.x,other.y,17,0,1,5.5,5,lk.skinDark);
+  const AL=17*(lk.armL||1);
+  limb(shB.x,shB.y,other.x,other.y,AL,0,1,5.5,5,lk.skinDark);
   ctx.fillStyle=lk.skinDark; ctx.beginPath(); ctx.arc(other.x,other.y,3.4,0,Math.PI*2); ctx.fill();
   const legs=[[hipB,bf,lk.skinDark],[hipF,ff,lk.skin]];
   for(const [hp,ft,col] of legs){
@@ -1680,7 +1931,7 @@ function drawAthlete(e,lk,hand,other,air,hang){
   ctx.fillStyle=lk.numCol; ctx.fillText(lk.num,0,-37);
   drawHead(lk,dir);
   // front arm on top
-  limb(shF.x,shF.y,hand.x,hand.y,17,0,1,6,5.2,lk.skin);
+  limb(shF.x,shF.y,hand.x,hand.y,AL,0,1,6,5.2,lk.skin);
   ctx.fillStyle=lk.skin; ctx.beginPath(); ctx.arc(hand.x,hand.y,3.6,0,Math.PI*2); ctx.fill();
   ctx.restore();
 }
@@ -1723,6 +1974,10 @@ function drawHead(lk,dir,mood){
     ctx.strokeStyle=lk.hairHi; ctx.lineWidth=1; ctx.beginPath();
     for(let i=0;i<4;i++){const x=hx+dir*(-6+i*4.5); ctx.moveTo(x,hy-12.5); ctx.lineTo(x+dir*2,hy-9);}
     ctx.stroke();
+  }
+  if(lk.band){   // a boss headband
+    ctx.save(); ctx.beginPath(); ctx.ellipse(hx,hy,R+0.6,R*1.05+0.6,0,0,Math.PI*2); ctx.clip();
+    ctx.fillStyle=lk.band; ctx.fillRect(hx-14,hy-10.5,28,3.6); ctx.restore();
   }
   // eyebrows: happy, shocked (raised) or grumpy (angled down)
   ctx.strokeStyle=lk.brow; ctx.lineWidth=1.6; ctx.lineCap="round"; ctx.beginPath();
@@ -1790,9 +2045,11 @@ function drawPlayer(){
 function drawCpu(){
   if(!cpuOn) return;
   shadow(d);
+  const S=BOSS?BS.size:1, A=BOSS?BS.arm:1;
   let hx=-16, hy=-24, ox=16, oy=-24;
   if(tip.on && !d.ground){hx=-20; hy=-84;}
-  else if(cdunk.on && cdunk.wind && !cdunk.resolved){hx=ball.x-d.x; hy=ball.y-d.y; ox=14; oy=-64;}
+  else if(cpuSwipe>0 && owner!==d){hx=-26*A/S; hy=-24;}
+  else if(cdunk.on && cdunk.wind && !cdunk.resolved){hx=(ball.x-d.x)/S; hy=(ball.y-d.y)/S; ox=14; oy=-64;}
   else if(cdunk.on){
     if(cdunk.t<RISE){hx=-10;hy=-96;ox=16;oy=-66;}
     else if(cdunk.t<RISE+SLAM+cdunk.hang || !cdunk.resolved){hx=-12;hy=-86;ox=14;oy=-64;}
@@ -1800,12 +2057,19 @@ function drawCpu(){
   }
   else if(owner===d && ball.state==="held"){
     if(cpu.charging||!d.ground){hx=cpu.charging?-4:-14; hy=cpu.charging?-74:-58;}
-    else {hx=-15; hy=Math.min(-24,ball.y-d.y-9);}
+    else {hx=-15; hy=Math.min(-24,(ball.y-d.y-9)/S);}
   }
-  else if(cpuArmUp()){hx=-20; hy=-84;}
+  else if(cpuArmUp()){const h=cpuHand(); hx=-Math.abs(h.x-d.x)/S; hy=(h.y-d.y)/S;}
   const hang=cdunk.on && cdunk.resolved && cdunk.t-RISE-SLAM<cdunk.hang;
   const F=-(d.face||-1);   // 1 = his usual way (left), -1 = turned round
+  ctx.save(); ctx.translate(d.x,d.y); ctx.scale(S,S); ctx.translate(-d.x,-d.y);
   drawAthlete(d,F===1?LOOK.d:Object.assign({},LOOK.d,{dir:-LOOK.d.dir}),{x:hx*F,y:hy},{x:ox*F,y:oy},!d.ground,hang);
+  ctx.restore();
+  if(BOSS && BS.speed>1 && Math.abs(d.spd||0)>150){   // Speedster streaks
+    const dir=Math.sign(d.spd); ctx.strokeStyle="rgba(255,255,255,0.55)"; ctx.lineWidth=2.5; ctx.lineCap="round";
+    for(let i=0;i<3;i++){const y=d.y-30-i*18*S; ctx.beginPath(); ctx.moveTo(d.x-dir*(20+i*4),y); ctx.lineTo(d.x-dir*(46+i*8),y); ctx.stroke();}
+  }
+  if(BOSS && !tip.on) drawCrown(d.x,d.y-(84*S+10),8);
 }
 // pebbled leather texture: fixed dot pattern inside the ball, reused every frame
 const PEBBLES=Array.from({length:26},(_,i)=>{const a=i*2.399, r=Math.sqrt((i+0.5)/26)*7; return [Math.cos(a)*r,Math.sin(a)*r];});
@@ -1917,7 +2181,8 @@ function drawHUD(){
     ctx.fillStyle=bg; rr(x,14,w,40,20); ctx.fill();
     ctx.strokeStyle="rgba(255,255,255,0.35)"; ctx.lineWidth=1.5; ctx.stroke();
     faceBadge(lk,x+20,34,17,mix(bg,"#FFFFFF",0.3));
-    text(name.toUpperCase(),x+43,34,BODY(13,900),ink); text(String(score),x+w-10,35,DISP(24),ink,"right");
+    let fs=13; ctx.font=BODY(fs,900); while(fs>8 && ctx.measureText(name.toUpperCase()).width>w-86){fs--; ctx.font=BODY(fs,900);}
+    text(name.toUpperCase(),x+43,34,BODY(fs,900),ink); text(String(score),x+w-10,35,DISP(24),ink,"right");
   };
   pill(64,166,LOOK.p,C.p1,NAME.p,stats.score);
   if(cpuOn) pill(238,166,LOOK.d,C.p2,NAME.d,stats.cpu);
@@ -2008,8 +2273,8 @@ function drawCelebration(){
   // manga portrait in a badge that breaks out of the panel
   const cx=x+86, cy=y+h/2-6, r=72;
   ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle=col; ctx.fill(); ctx.clip();
-  if(img.complete && img.naturalWidth) ctx.drawImage(img,70,8,260,260,cx-r,cy-r,r*2,r*2);
-  ctx.restore();
+  if(BOSS && who==="d"){ctx.restore(); faceBadge(LOOK.d,cx,cy,r,col);}
+  else {if(img.complete && img.naturalWidth) ctx.drawImage(img,70,8,260,260,cx-r,cy-r,r*2,r*2); ctx.restore();}
   ctx.strokeStyle=C.ink; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
   // commentary next to the face
   const tx=x+178, maxW=w-196;
@@ -2060,7 +2325,7 @@ function drawGame(){
     for(let i=0;i<3;i++){ctx.beginPath();ctx.moveTo(d.x+22+i*6,d.y-20-i*14);ctx.lineTo(d.x+40+i*6,d.y+4-i*14);ctx.stroke();}
   }
   ctx.restore();
-  drawMeter(); drawHUD(); drawControls(); drawMsg(); drawScreenFx();
+  drawMeter(); drawHUD(); drawControls(); drawMsg(); drawSigFlash(); drawScreenFx();
 }
 
 function draw(){
