@@ -494,8 +494,25 @@ function crowdProximity(){
   else return Math.max(CROWD_FLOOR,0.3);   // loose ball: a buzz while someone goes for it
   return Math.max(CROWD_FLOOR,crowdU(Math.hypot(x-hoop.x,y-hoop.y)));
 }
+// the main menu: the DE-FENSE chant plays softly in the background, a short pause between rounds
+const MENU_CHANT={ch:null,wait:1.2};
+function menuChantTick(dt){
+  const c=SND.ctx, ok=screen==="title" && SND.on && SND.crowd && c && c.state==="running" && SND.buf.defense;
+  if(!ok){
+    if(MENU_CHANT.ch){ try{const t=c.currentTime, g=MENU_CHANT.ch.g.gain; g.cancelScheduledValues(t+0.01); g.setTargetAtTime(0,t+0.01,0.25); MENU_CHANT.ch.s.stop(t+1.6);}catch(_){} MENU_CHANT.ch=null; }
+    MENU_CHANT.wait=1.2; return;
+  }
+  if(MENU_CHANT.ch) return;   // a round is playing
+  MENU_CHANT.wait-=dt; if(MENU_CHANT.wait>0) return;
+  const t=c.currentTime+0.02, s=c.createBufferSource(), g=c.createGain();
+  s.buffer=SND.buf.defense; g.gain.value=0; g.gain.setValueAtTime(0,t); g.gain.setTargetAtTime(0.13,t,0.08);
+  s.connect(g); g.connect(SND.master); s.start(t); s.stop(t+SND.buf.defense.duration+0.05);
+  const ch={s,g}; MENU_CHANT.ch=ch;
+  s.onended=()=>{ if(MENU_CHANT.ch===ch){ MENU_CHANT.ch=null; MENU_CHANT.wait=3+Math.random()*4; } };
+}
 // called from update() every frame
 function crowdUpdate(dt){
+  menuChantTick(dt);
   const c=SND.ctx, want=SND.on && SND.crowd && c && (c.state==="running"||CROWD.test) && (screen==="play"||screen==="pause"||screen==="over") && cpuOn;
   if(!want){ if(CROWD.nodes) crowdStop(); return; }
   if(!CROWD.nodes){ crowdStart(); if(!CROWD.nodes) return; }
