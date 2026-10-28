@@ -73,7 +73,7 @@ const RR={x:757,y:184,board:777,front:737,dir:1};   // right hoop: Player 1 atta
 const RL={x:87,y:184,board:67,front:107,dir:-1};    // left hoop: computer attacks it
 const THREE=550, HALF=422;
 const JOY={x:74,y:320,r:54}, SHOOT={x:782,y:328,r:42}, JUMP={x:713,y:295,r:33};
-const PAUSE_BTN={x:16,y:14,w:40,h:40}, SOUND_BTN={x:16,y:62,w:40,h:40};
+const PAUSE_BTN={x:16,y:14,w:40,h:40}, SOUND_BTN={x:16,y:62,w:40,h:40}, CROWD_BTN={x:16,y:110,w:40,h:40};
 const ZONES={
   inside:{name:"Inside 3PT", n:[60,80], f:[64,76], pts:2, cpu:0.68},
   mid:{name:"3PT to half court", n:[70,80], f:[72,78], pts:3, cpu:0.48},
@@ -288,7 +288,7 @@ function takeBall(e){
 }
 
 // ---------- sound: real recordings (CC0, from Freesound) for the crowd, whistle, ball and rim; little synth effects for the rest ----------
-const SND={ctx:null,on:true,master:null,noise:null,last:{},buf:{},loop:{}};
+const SND={crowd:true,ctx:null,on:true,master:null,noise:null,last:{},buf:{},loop:{}};
 function audioInit(){   // phones only allow sound after the first tap, so this runs on every tap/key
   try{
     if(SND.ctx){ if(SND.ctx.state==="suspended") SND.ctx.resume(); return; }
@@ -399,8 +399,10 @@ const SFX={
   tick(){ tone(1500,0.06,{vol:0.13}); tone(2250,0.05,{vol:0.07,at:0.01}); },
   click(){ tone(900,0.03,{vol:0.12}); }
 };
+const CROWD_SFX=["cheer","groan","gasp"];   // the crowd's reactions; everything else is the ball, the hoop, the whistle or the buttons
 function play(name,arg){
   if(!SND.on||!SND.ctx||SND.ctx.state!=="running") return;
+  if(!SND.crowd && CROWD_SFX.includes(name)) return;
   const now=performance.now(); if(now-(SND.last[name]||0)<45) return;   // the same sound can't stack up in one moment
   SND.last[name]=now;
   try{ SFX[name](arg); }catch(_){}
@@ -494,7 +496,7 @@ function crowdProximity(){
 }
 // called from update() every frame
 function crowdUpdate(dt){
-  const c=SND.ctx, want=SND.on && c && (c.state==="running"||CROWD.test) && (screen==="play"||screen==="pause"||screen==="over") && cpuOn;
+  const c=SND.ctx, want=SND.on && SND.crowd && c && (c.state==="running"||CROWD.test) && (screen==="play"||screen==="pause"||screen==="over") && cpuOn;
   if(!want){ if(CROWD.nodes) crowdStop(); return; }
   if(!CROWD.nodes){ crowdStart(); if(!CROWD.nodes) return; }
   let target = screen==="play" ? crowdProximity() : (screen==="pause"?0.05:0.3);
@@ -1469,9 +1471,10 @@ function loadSave(){
       for(let n=0;n<Math.min(progress[b],LEVELS);n++){const box=n%STOPS===STOPS-1?crowns[b]:medals[b]; if(!box.includes(n)) box.push(n);}
     }
     if(s.sound===false) SND.on=false;
+    if(s.crowd===false) SND.crowd=false;
   }catch(_){}
 }
-function saveGame(){try{localStorage.setItem(SAVE_KEY,JSON.stringify({kits,human,wins,progress,medals,crowns,owned,skinOf,bonus,spent,extraBalls,shoesOwned,sound:SND.on}));}catch(_){}}
+function saveGame(){try{localStorage.setItem(SAVE_KEY,JSON.stringify({kits,human,wins,progress,medals,crowns,owned,skinOf,bonus,spent,extraBalls,shoesOwned,sound:SND.on,crowd:SND.crowd}));}catch(_){}}
 
 // ---------- screens: title, setup, play, pause, game over ----------
 let screen="title", mode="vs", overWinner="p", ui=[];
@@ -2231,7 +2234,8 @@ function drawTitle(){
   const at=b=>progress[b]>=LEVELS?"done!":"L"+(Math.floor(progress[b]/STOPS)+1)+" · G"+(progress[b]%STOPS+1);
   text("WHERE EACH BOY IS UP TO",cx,326,BODY(11,900),C.muted,"center");
   text(BOYS.zackie.name+"  "+at("zackie")+"     "+BOYS.keelan.name+"  "+at("keelan"),cx,346,BODY(15,900),C.ink,"center");
-  button(cx-60,358,120,26,SND.on?"SOUND ON":"SOUND OFF",{size:12,outline:"rgba(255,255,255,0.3)"},toggleSound);
+  button(cx-128,358,122,26,SND.on?"SOUND ON":"SOUND OFF",{size:12,outline:"rgba(255,255,255,0.3)"},toggleSound);
+  button(cx+6,358,122,26,SND.crowd?"CROWD ON":"CROWD OFF",{size:12,outline:"rgba(255,255,255,0.3)",disabled:!SND.on},toggleCrowd);
 }
 function swatch(cx,cy,r,col,sel,disabled,fn){
   ctx.globalAlpha=disabled?0.25:1;
@@ -2313,8 +2317,10 @@ function drawPause(){
   button(bx,134,300,50,"RESUME",{fill:"#2F6FE4"},()=>{screen="play"; needRelease=true;});
   button(bx,194,300,44,"RESTART",{outline:"rgba(255,255,255,0.3)"},()=>startGame());
   button(bx,248,300,44,"MAIN MENU",{outline:"rgba(255,255,255,0.3)"},toMap);
-  button(bx,302,300,40,SND.on?"SOUND: ON":"SOUND: OFF",{outline:"rgba(255,255,255,0.3)",size:15},toggleSound);
+  button(bx,302,146,40,SND.on?"SOUND: ON":"SOUND: OFF",{outline:"rgba(255,255,255,0.3)",size:14},toggleSound);
+  button(bx+154,302,146,40,SND.crowd?"CROWD: ON":"CROWD: OFF",{outline:"rgba(255,255,255,0.3)",size:14,disabled:!SND.on},toggleCrowd);
 }
+function toggleCrowd(){SND.crowd=!SND.crowd; saveGame(); SND.last.click=0; play("click");}   // the crowd fades out or back in by itself
 function toggleSound(){SND.on=!SND.on; saveGame();
   if(SND.master) try{SND.master.gain.setTargetAtTime(SND.on?0.55:0,SND.ctx.currentTime,0.03);}catch(_){}   // silences anything still playing
   if(SND.on){audioInit(); SND.last.click=0; play("click");}}
@@ -2656,10 +2662,19 @@ function drawSoundBtn(){   // a speaker: waves when the sound is on, a red cross
   if(SND.on){ ctx.strokeStyle=C.ink; for(const r of [6,11]){ctx.beginPath(); ctx.arc(x+12,y,r,-0.8,0.8); ctx.stroke();} }
   else { ctx.strokeStyle=C.red; ctx.beginPath(); ctx.moveTo(x+15,y-6); ctx.lineTo(x+25,y+6); ctx.moveTo(x+25,y-6); ctx.lineTo(x+15,y+6); ctx.stroke(); }
 }
+function drawCrowdBtn(){   // three little heads in the stands: a red cross when the crowd is off
+  const b=CROWD_BTN, cx=b.x+b.w/2, cy=b.y+b.h/2+2;
+  ctx.fillStyle=C.panel; rr(b.x,b.y,b.w,b.h,12); ctx.fill();
+  ctx.globalAlpha=SND.on?1:0.4; ctx.fillStyle=C.ink;
+  for(const [dx,dy,r] of [[-9,2,4],[9,2,4],[0,-2,4.6]]){ctx.beginPath(); ctx.arc(cx+dx,cy+dy-6,r,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx+dx,cy+dy+6,r*1.5,Math.PI,0); ctx.fill();}
+  ctx.globalAlpha=1;
+  if(!SND.crowd||!SND.on){ctx.strokeStyle=C.red; ctx.lineWidth=3; ctx.lineCap="round"; ctx.beginPath(); ctx.moveTo(cx-12,cy-12); ctx.lineTo(cx+12,cy+10); ctx.stroke();}
+}
 function drawHUD(){
   ctx.fillStyle=C.panel; rr(PAUSE_BTN.x,PAUSE_BTN.y,PAUSE_BTN.w,PAUSE_BTN.h,12); ctx.fill();
   ctx.fillStyle=C.ink; ctx.fillRect(29,25,5,18); ctx.fillRect(38,25,5,18);
-  drawSoundBtn();
+  drawSoundBtn(); drawCrowdBtn();
   const pill=(x,w,lk,bg,name,score)=>{
     const ink=inkOn(bg);
     ctx.fillStyle=bg; rr(x,14,w,40,20); ctx.fill();
@@ -2847,6 +2862,9 @@ cv.addEventListener("pointerdown",e=>{
   if(q.x>=SOUND_BTN.x-6&&q.x<=SOUND_BTN.x+SOUND_BTN.w+6&&q.y>=SOUND_BTN.y-4&&q.y<=SOUND_BTN.y+SOUND_BTN.h+6){
     toggleSound(); e.preventDefault(); return;
   }
+  if(q.x>=CROWD_BTN.x-6&&q.x<=CROWD_BTN.x+CROWD_BTN.w+6&&q.y>=CROWD_BTN.y-2&&q.y<=CROWD_BTN.y+CROWD_BTN.h+6){
+    if(SND.on) toggleCrowd(); e.preventDefault(); return;
+  }
   if(Math.hypot(q.x-SHOOT.x,q.y-SHOOT.y)<SHOOT.r+18){role="shoot";shootTouch=true;}
   else if(Math.hypot(q.x-JUMP.x,q.y-JUMP.y)<JUMP.r+12){role="jump";jumpQueued=true;}
   else if(q.x<HALF && q.y>200){role="joy";touchJoy=clamp((q.x-JOY.x)/40,-1,1);touchJoyY=clamp((q.y-JOY.y)/40,-1,1);}
@@ -2879,6 +2897,7 @@ cv.addEventListener("keydown",e=>{
   if(e.repeat) return;
   if(screen==="title" && (k==="ArrowUp"||k==="ArrowDown")){ scrollMap(k==="ArrowUp"?-60:60); return; }
   if(k==="m"||k==="M"){ toggleSound(); return; }
+  if(k==="c"||k==="C"){ if(SND.on) toggleCrowd(); return; }
   if(k==="Escape"||k==="p"){ if(screen==="play") screen="pause"; else if(screen==="pause") screen="play"; return; }
   if(k==="Enter"){
     if(screen==="title") openNextLevel(); else if(screen==="setup") tryStart();
