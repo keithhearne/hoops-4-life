@@ -378,7 +378,7 @@ const SFX={
     if(size>=1.6) sample("cheer",{vol:0.15,dur:dur-0.6,at:0.3,rate:1.05,off:0.8});   // a second section of the stands joins in
   },
   groan(){ sample("ooh",{vol:0.26,dur:2.4,rate:vary(0.03)}); crowdDeflate(); },   // the crowd goes "ooooh"
-  gasp(){ sample("gasp",{vol:0.35,dur:1.6,rate:vary(0.03)}); },
+  gasp(){ sample("ooh",{vol:0.22,dur:1.8,rate:vary(0.04),off:0.15}); },   // the opponent's block or steal: the home crowd goes "ooh"
   thunder(){   // a sharp crack, then a long low rumble
     hiss(0.12,{filter:"highpass",f:1800,vol:0.35,atk:0.002});
     const r=hiss(1.8,{filter:"lowpass",f:160,q:0.7,vol:0.55,atk:0.04,hold:0.3});
@@ -499,10 +499,13 @@ function crowdUpdate(dt){
   if(!CROWD.nodes){ crowdStart(); if(!CROWD.nodes) return; }
   let target = screen==="play" ? crowdProximity() : (screen==="pause"?0.05:0.3);
   if(CROWD.deflate>0){ CROWD.deflate-=dt; target*=0.35; }   // a miss: the air goes out of the crowd
-  // the chant: only while you're defending, at random times, and it stops when you get the ball back
-  const defending=screen==="play" && (owner===d || (ball.state==="flight"&&ball.shooter===d));
-  if(defending){ CROWD.chantWait-=dt; if(CROWD.chantWait<=0 && !tip.on){ chantStart(); CROWD.chantWait=25+Math.random()*25; } }
-  else if(CROWD.chant && owner===p) chantStop(0.3);
+  // the chant: 2-4 seconds after the opponent gets the ball (on about 3 of every 4 of his possessions),
+  // and it fades as soon as you get the ball back
+  const defending=screen==="play" && !tip.on && (owner===d || (ball.state==="flight"&&ball.shooter===d));
+  if(defending && !CROWD.wasDef){ CROWD.chantWait=2+Math.random()*2; CROWD.chantArmed=Math.random()<0.75; }
+  CROWD.wasDef=defending;
+  if(defending && CROWD.chantArmed){ CROWD.chantWait-=dt; if(CROWD.chantWait<=0){ chantStart(); CROWD.chantArmed=false; } }
+  else if(!defending && CROWD.chant && owner===p) chantStop(0.3);
   // smooth in JavaScript first (time constant about 0.35 s), then hand the audio thread short straight ramps
   CROWD.level+=(target-CROWD.level)*Math.min(1,dt/(target>CROWD.level?0.7:0.35));   // builds slowly, settles faster
   const now=c.currentTime;
@@ -840,7 +843,7 @@ function update(dt){
   // Ankle Breaker: change direction sharply right in front of him and he can fall for it
   if(PS && PS.ankle && cpuOn && owner===p && ball.state==="held" && !charge.on && !dunk.on && d.x>p.x && d.x-p.x<90 && Math.abs(joy)>0.5){
     if(pJoyLast*joy<0 && dStunCool<=0 && Math.random()<PS.ankle*2.2){
-      dStun=0.6+PS.ankle; dStunCool=3; say("ANKLES BROKEN!",NAME.p+" crossed "+NAME.d+" over!",C.info); play("squeak"); play("gasp"); setMood(d,"shock"); setMood(p,"happy");
+      dStun=0.6+PS.ankle; dStunCool=3; say("ANKLES BROKEN!",NAME.p+" crossed "+NAME.d+" over!",C.info); play("squeak"); play("cheer",0.75); setMood(d,"shock"); setMood(p,"happy");
     }
   }
   if(Math.abs(joy)>0.5) pJoyLast=joy;
@@ -1016,7 +1019,7 @@ function setCpuPlan(){
   }
 }
 function blocked(by,save){
-  play("smack"); play("gasp");
+  play("smack"); if(by===d) play("gasp"); else play("cheer",0.75);   // his block: "ooh"; your block: a cheer
   const shooterDir = ball.shooter===p ? 1 : -1;
   ball.state="free"; ball.timer=0; ball.live=false;
   if(save){ball.vx=-shooterDir*(140+Math.random()*70); ball.vy=-90;}   // swatted away from the hoop
