@@ -365,8 +365,8 @@ const SFX={
   dribble(){ tone(130,0.09,{f2:60,vol:0.22}); hiss(0.03,{filter:"lowpass",f:500,vol:0.08}); },
   bounce(v){ const k=Math.min(1,v/700); if(k<0.08) return; tone(120,0.12,{f2:55,vol:0.3*k+0.03}); hiss(0.04,{filter:"lowpass",f:600,vol:0.12*k}); },
   rim(v){ const k=Math.min(1,(v||400)/600);   // ball on the rim: a rubber thump with a short, choked clank
-    sample(k>0.55?"rim2":"rim1",{vol:(0.3+0.55*k)*0.75,rate:vary(0.05)}); },   // 3/4 of the earlier level
-  board(v){ const k=Math.min(1,(v||400)/600); sample("board",{vol:(0.3+0.6*k)*0.75,rate:vary(0.04)}); },
+    sample(k>0.55?"rim2":"rim1",{vol:(0.3+0.55*k)*0.5625,rate:vary(0.05)}); },   // turned down a quarter twice (3/4 x 3/4)
+  board(v){ const k=Math.min(1,(v||400)/600); sample("board",{vol:(0.3+0.6*k)*0.5625,rate:vary(0.04)}); },
   swish(){ hiss(0.38,{f:6500,f2:2200,q:0.9,vol:0.2,atk:0.03}); },
   cheer(size){   // a real arena crowd: bigger plays get a louder, longer, fuller roar
     size=size||1; crowdCelebrate(size);
@@ -391,7 +391,7 @@ const SFX={
     for(let i=0;i<n;i++) tone(2800+Math.random()*4500,0.05+Math.random()*0.14,{vol:0.05+Math.random()*0.05,at:Math.random()*(big?0.7:0.35)});
   },
   crack(){ for(let i=0;i<7;i++) hiss(0.025,{filter:"highpass",f:2200,vol:0.18,at:i*0.02+Math.random()*0.01}); tone(1600,0.06,{vol:0.06}); },
-  slam(){ sample("rim2",{vol:0.75,rate:0.92}); tone(95,0.25,{f2:45,vol:0.4}); },
+  slam(){ sample("rim2",{vol:0.5625,rate:0.92}); tone(95,0.25,{f2:45,vol:0.4}); },
   smack(){ hiss(0.06,{f:1300,q:1,vol:0.3}); tone(300,0.06,{f2:180,vol:0.22}); },
   swipe(){ hiss(0.16,{f:700,f2:2600,q:1.4,vol:0.16,atk:0.02}); },
   squeak(){ tone(2300,0.11,{f2:3100,vol:0.07,type:"triangle"}); },
