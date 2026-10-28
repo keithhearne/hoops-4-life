@@ -1,12 +1,13 @@
 // Offline support: keep the game files on the phone so it opens without internet.
-const CACHE = "hoops4life-48";
+const CACHE = "hoops4life-49";
 const FILES = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png",
   "./icon-maskable-512.png", "./apple-touch-icon.png"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
 });
+// only clear this game's own old copies: other games on the same site keep theirs
 self.addEventListener("activate", e => {
-  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith("hoops4life-") && k !== CACHE).map(k => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 // game files: use the network when online so updates arrive, fall back to the saved copy offline
